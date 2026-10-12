@@ -1,0 +1,6 @@
+venv/
+**/__pycache__/
+obsidian_vault/
+*.pyc
+.git/
+src/node/

@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>JARVIS</title>
+    <link rel="icon" type="image/jpeg" href="favicon.jpg">
+    <!-- Fontes Sci-Fi HUD Militares: Orbitron, Share Tech Mono e Rajdhani -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;600;700;900&family=Rajdhani:wght@500;600;700&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="styles.css?v=20261009_v16">
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+</head>
+<body>
+    <!-- Overlay de Grid e Fundo Tático Sci-Fi -->
+    <div class="hud-background">
+        <div class="grid-layer"></div>
+        <div class="vignette-layer"></div>
+        <div class="scanlines-layer"></div>
+    </div>
+
+    <div class="hud-root">
+        <!-- TOP HUD BAR / HEADER -->
+        <header class="hud-top-bar">
+            <div class="top-left-controls">
+                <button class="top-icon-btn" id="btn-fullscreen" title="Tela Cheia (F11)">
+                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"></path>
+                    </svg>
+                </button>
+            </div>
+
+            <div class="top-center-title">
+                <h1 class="hud-brand-title">JARVIS</h1>
+                <span class="hud-brand-subtitle">Personal AI Assistant</span>
+            </div>
+
+            <div class="top-right-clock">
+                <div class="digital-time" id="digital-clock">00:00:00</div>
+                <div class="digital-date" id="digital-date">Carregando data...</div>
+            </div>
+        </header>
+
+        <!-- MAIN 3-COLUMN WORKSPACE -->
+        <main class="hud-main-workspace">
+            <!-- LEFT COLUMN: SYS MONITOR & STATUS -->
+            <section class="hud-left-column">
+                <!-- SYS MONITOR BOX -->
+                <div class="hud-panel sys-monitor-box">
+                    <div class="panel-header">
+                        <span class="panel-caret">▾</span>
+                        <span class="panel-name">SYS MONITOR</span>
+                    </div>
+                    <div class="monitor-metrics">
+                        <!-- CPU -->
+                        <div class="metric-row">
+                            <div class="metric-info">
+                                <span class="metric-label">CPU</span>
+                                <span class="metric-val" id="val-cpu">38%</span>
+                            </div>
+                            <div class="metric-track">
+                                <div class="metric-bar cpu-bar" id="bar-cpu" style="width: 38%;"></div>
+                            </div>
+                        </div>
+
+                        <!-- RAM -->
+                        <div class="metric-row">
+                            <div class="metric-info">
+                                <span class="metric-label">RAM</span>
+                                <span class="metric-val amber-val" id="val-ram">42%</span>
+                            </div>
+                            <div class="metric-track">
+                                <div class="metric-bar ram-bar" id="bar-ram" style="width: 42%;"></div>
+                            </div>
+                        </div>
+
+                        <!-- NET -->
+                        <div class="metric-row">
+                            <div class="metric-info">
+                                <span class="metric-label">NET</span>
+                                <span class="metric-val green-val" id="val-net">504 KB/s</span>
+                            </div>
+                            <div class="metric-track">
+                                <div class="metric-bar net-bar" id="bar-net" style="width: 65%;"></div>
+                            </div>
+                        </div>
+
+                        <!-- GPU -->
+                        <div class="metric-row">
+                            <div class="metric-info">
+                                <span class="metric-label">GPU</span>
+                                <span class="metric-val orange-val" id="val-gpu">18%</span>
+                            </div>
+                            <div class="metric-track">
+                                <div class="metric-bar gpu-bar" id="bar-gpu" style="width: 18%;"></div>
+                            </div>
+                        </div>
+
+                        <!-- TMP -->
+                        <div class="metric-row">
+                            <div class="metric-info">
+                                <span class="metric-label">TMP</span>
+                                <span class="metric-val red-val" id="val-temp">44°C</span>
+                            </div>
+                            <div class="metric-track">
+                                <div class="metric-bar temp-bar" id="bar-temp" style="width: 44%;"></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- FOOTER METRICS -->
+                    <div class="monitor-footer-specs">
+                        <div class="spec-col">
+                            <span class="spec-label">UP</span>
+                            <span class="spec-val green-val" id="spec-uptime">02:45</span>
+                        </div>
+                        <div class="spec-col">
+                            <span class="spec-label">PROC</span>
+                            <span class="spec-val" id="spec-procs">247</span>
+                        </div>
+                        <div class="spec-col">
+                            <span class="spec-label">OS</span>
+                            <span class="spec-val amber-val" id="spec-os">ARCH</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- STATUS BUTTONS & SYSTEM CHIPS -->
+                <div class="left-status-group">
+                    <div class="status-chip active-chip">
+                        <span class="chip-label">AI CORE:</span>
+                        <span class="chip-status text-green" id="chip-core">ACTIVE</span>
+                    </div>
+                    <div class="status-chip">
+                        <span class="chip-label">ARC:</span>
+                        <span class="chip-status text-cyan">CLEARED</span>
+                    </div>
+                    <div class="status-chip">
+                        <span class="chip-label">PROTOCOL:</span>
+                        <span class="chip-status text-cyan">LV</span>
+                    </div>
+
+                    <div class="left-action-links">
+                        <button class="text-link-btn" id="btn-help">[?] Help</button>
+                        <button class="text-link-btn" id="btn-f11-link">[F11] Fullscreen</button>
+                    </div>
+                </div>
+            </section>
+
+            <!-- CENTER COLUMN: HOLOGRAPHIC 3D CELESTIAL CORE -->
+            <section class="hud-center-column">
+                <div class="holo-core-viewport" id="holo-viewport" onclick="handleMicToggle(event)" role="button" aria-label="Alternar Microfone" title="Alternar Microfone (Mudo / Ativo)">
+                    <canvas id="holo-sphere-canvas" onclick="handleMicToggle(event)"></canvas>
+                </div>
+
+                <!-- CORE STATUS & AUDIO WAVEFORM -->
+                <div class="core-status-bar">
+                    <div class="status-mode-pill muted" id="core-state-indicator">
+                        <svg class="mode-icon" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
+                            <line x1="1" y1="1" x2="23" y2="23"></line>
+                            <path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6"></path>
+                            <path d="M17 16.95A7 7 0 0 1 5 12v-2m14 0v2a7 7 0 0 1-.11 1.23"></path>
+                            <line x1="12" y1="19" x2="12" y2="23"></line>
+                            <line x1="8" y1="23" x2="16" y2="23"></line>
+                        </svg>
+                        <span class="mode-text" id="core-mode-label">MUTED</span>
+                    </div>
+
+                    <div class="waveform-dots" id="waveform-dots">
+                        <!-- Pontos animados de visualização de áudio / onda pontilhada -->
+                        <span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span>
+                        <span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span>
+                        <span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span>
+                        <span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span>
+                        <span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span>
+                        <span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span>
+                        <span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span>
+                    </div>
+                </div>
+            </section>
+
+            <!-- RIGHT COLUMN: ACTIVITY LOG, FILE UPLOAD & COMMAND INPUT -->
+            <section class="hud-right-column">
+                <!-- ACTIVITY LOG PANEL -->
+                <div class="hud-panel activity-log-box">
+                    <div class="panel-header">
+                        <span class="panel-caret">▾</span>
+                        <span class="panel-name">ACTIVITY LOG</span>
+                    </div>
+                    <div class="log-stream-container" id="log-stream">
+                        <div class="log-line sys">SYS: JARVIS online.</div>
+                        <div class="log-line sys">SYS: Node cachyos_linux connected.</div>
+                        <div class="log-line sys">SYS: Microphone muted.</div>
+                    </div>
+                </div>
+
+                <!-- FILE UPLOAD DROPZONE -->
+                <div class="hud-panel file-upload-box" id="file-dropzone">
+                    <div class="panel-header">
+                        <span class="panel-caret">▾</span>
+                        <span class="panel-name">FILE UPLOAD</span>
+                    </div>
+                    <input type="file" id="file-hidden-input" style="display: none;" multiple>
+                    <div class="dropzone-content">
+                        <div class="upload-arrow-icon">
+                            <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2">
+                                <line x1="12" y1="19" x2="12" y2="5"></line>
+                                <polyline points="5 12 12 5 19 12"></polyline>
+                            </svg>
+                        </div>
+                        <div class="drop-text-primary">Drop file here or <span class="highlight-cyan">Click to Browse</span></div>
+                        <div class="drop-text-sub">Images • Video • Audio • PDF • Docs • Code • Data</div>
+                        <div class="file-status-label" id="file-status-label">No file loaded - drop or click above to upload</div>
+                    </div>
+                </div>
+
+                <!-- COMMAND INPUT & ACTIONS -->
+                <div class="hud-panel command-input-box">
+                    <div class="panel-header">
+                        <span class="panel-caret">▾</span>
+                        <span class="panel-name">COMMAND INPUT</span>
+                    </div>
+                    
+                    <div class="input-line-wrapper">
+                        <input type="text" id="cmd-input" class="sci-fi-input" placeholder="Type a command or question..." autocomplete="off" spellcheck="false">
+                        <button id="send-btn" class="sci-fi-send-btn" title="Enviar comando (Enter)">
+                            <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
+                                <polygon points="5 3 19 12 5 21 5 3"></polygon>
+                            </svg>
+                        </button>
+                    </div>
+
+                    <!-- CONTROL BUTTONS: INTERRUPT & MICROPHONE -->
+                    <div class="control-actions-row">
+                        <button type="button" class="action-btn btn-interrupt" id="btn-interrupt" onclick="handleInterruptToggle(event)">
+                            <span class="btn-icon">⚡</span>
+                            <span class="btn-text">INTERRUPT</span>
+                            <span class="btn-sub">[ESC]</span>
+                        </button>
+
+                        <button type="button" class="action-btn btn-mic muted" id="btn-microphone" onclick="handleMicToggle(event)">
+                            <svg class="mic-svg" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
+                                <line x1="1" y1="1" x2="23" y2="23"></line>
+                                <path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6"></path>
+                                <path d="M17 16.95A7 7 0 0 1 5 12v-2m14 0v2a7 7 0 0 1-.11 1.23"></path>
+                                <line x1="12" y1="19" x2="12" y2="23"></line>
+                                <line x1="8" y1="23" x2="16" y2="23"></line>
+                            </svg>
+                            <span class="btn-text" id="mic-btn-text">MICROPHONE MUTED</span>
+                        </button>
+                    </div>
+                </div>
+
+                <div class="hud-footer-credits">
+                    <span>By TechMaker (v2.3)</span>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <script src="app.js?v=20261010_v30"></script>
+</body>
+</html>

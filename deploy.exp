@@ -1,0 +1,6 @@
+#!/usr/bin/expect -f
+set timeout -1
+spawn scp -r /home/samuel/Documentos/Programacao/jarvis/src samuel@192.168.1.92:/home/samuel/Documentos/Programacao/jarvis/
+expect "assword:"
+send "\$samuca123\$\n"
+expect eof

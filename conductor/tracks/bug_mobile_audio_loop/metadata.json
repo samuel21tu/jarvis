@@ -1,0 +1,12 @@
+{
+  "id": "bug_mobile_audio_loop",
+  "type": "bug",
+  "title": "Correção de Mudo e Loop Infinito no Microfone Mobile",
+  "status": "completed",
+  "created_at": "2026-10-08T10:17:00-03:00",
+  "assigned_nodes": [
+    "antigravity-2-linux-app",
+    "antigravity-3-frontend",
+    "antigravity-4-qa"
+  ]
+}

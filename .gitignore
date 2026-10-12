@@ -1,0 +1,42 @@
+# Ambientes Virtuais
+venv/
+.venv/
+env/
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Arquivos de Variáveis de Ambiente e Segredos
+.env
+*.env.local
+*.pem
+*.key
+*.cert
+
+# Bancos de Dados e Dados Locais
+data/
+*.db
+*.sqlite3
+*.db-shm
+*.db-wal
+
+# Logs e Saídas Temporárias
+*.log
+flatpak_log*.txt
+webview_log.txt
+deploy.tar.gz
+deploy_mobile.tar.gz
+
+# Dependências Node.js
+node_modules/
+
+# Flatpak e Builds
+.flatpak-builder/
+build-dir/
+.maestri/
+
+# IDE e Sistema Operacional
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

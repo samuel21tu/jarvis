@@ -1,0 +1,1150 @@
+/* ==========================================================================
+   JARVIS HOLOGRAPHIC HUD // DESIGN SYSTEM & STYLESHEET
+   Aparência idêntica à interface sci-fi com esferas orbitais e monitores táticos
+   ========================================================================== */
+
+:root {
+    --bg-dark: #02060b;
+    --bg-panel: rgba(2, 12, 22, 0.75);
+    --bg-panel-solid: #030c14;
+    
+    /* Paleta Tática Sci-Fi */
+    --cyan-neon: #00f3ff;
+    --cyan-bright: #00d4ff;
+    --cyan-dim: rgba(0, 212, 255, 0.28);
+    --cyan-subtle: rgba(0, 212, 255, 0.12);
+    --cyan-glow: 0 0 12px rgba(0, 243, 255, 0.45);
+    
+    --amber-neon: #ffb703;
+    --orange-neon: #fb8500;
+    --green-neon: #00ff9d;
+    --red-alert: #ff2a6d;
+    --red-muted-bg: rgba(255, 42, 109, 0.09);
+    --red-muted-border: rgba(255, 42, 109, 0.45);
+
+    /* Tipografias */
+    --font-hud: 'Share Tech Mono', monospace;
+    --font-title: 'Orbitron', sans-serif;
+    --font-ui: 'Rajdhani', sans-serif;
+}
+
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+    user-select: none;
+    -webkit-user-select: none;
+}
+
+body {
+    background-color: var(--bg-dark);
+    color: var(--cyan-bright);
+    font-family: var(--font-hud);
+    height: 100vh;
+    width: 100%;
+    overflow: hidden;
+    position: relative;
+    display: flex;
+    flex-direction: column;
+}
+
+/* ==========================================================================
+   BACKGROUND LAYERS & SCI-FI SCANLINES
+   ========================================================================== */
+.hud-background {
+    position: absolute;
+    top: 0; left: 0; right: 0; bottom: 0;
+    pointer-events: none;
+    z-index: 0;
+    overflow: hidden;
+}
+
+.grid-layer {
+    position: absolute;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background-image: 
+        linear-gradient(rgba(0, 212, 255, 0.035) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(0, 212, 255, 0.035) 1px, transparent 1px);
+    background-size: 32px 32px;
+    opacity: 0.8;
+}
+
+.vignette-layer {
+    position: absolute;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: radial-gradient(circle at center, transparent 35%, rgba(0, 2, 6, 0.85) 100%);
+}
+
+.scanlines-layer {
+    position: absolute;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: repeating-linear-gradient(
+        0deg,
+        rgba(0, 0, 0, 0.15),
+        rgba(0, 0, 0, 0.15) 1px,
+        transparent 1px,
+        transparent 2px
+    );
+    opacity: 0.6;
+}
+
+/* ==========================================================================
+   HUD ROOT CONTAINER
+   ========================================================================== */
+.hud-root {
+    position: relative;
+    z-index: 10;
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    width: 100%;
+    padding: 12px 18px;
+    gap: 12px;
+}
+
+/* ==========================================================================
+   TOP BAR / HEADER
+   ========================================================================== */
+.hud-top-bar {
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    align-items: center;
+    padding: 4px 10px;
+    border-bottom: 1px solid rgba(0, 212, 255, 0.18);
+    position: relative;
+    flex-shrink: 0;
+}
+
+.hud-top-bar::after {
+    content: '';
+    position: absolute;
+    bottom: -1px;
+    left: 20%;
+    right: 20%;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, var(--cyan-neon), transparent);
+}
+
+.top-left-controls {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.mark-tag {
+    font-family: var(--font-title);
+    font-size: 0.85rem;
+    font-weight: 700;
+    letter-spacing: 2px;
+    color: var(--cyan-neon);
+    text-shadow: var(--cyan-glow);
+}
+
+.top-icon-btn {
+    background: transparent;
+    border: 1px solid var(--cyan-dim);
+    color: var(--cyan-bright);
+    width: 26px;
+    height: 26px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    border-radius: 3px;
+    transition: all 0.2s ease;
+}
+
+.top-icon-btn:hover {
+    background: var(--cyan-subtle);
+    border-color: var(--cyan-neon);
+    box-shadow: var(--cyan-glow);
+    color: #fff;
+}
+
+/* Center Title Branding */
+.top-center-title {
+    text-align: center;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}
+
+.hud-brand-title {
+    font-family: var(--font-title);
+    font-size: 1.45rem;
+    font-weight: 900;
+    letter-spacing: 6px;
+    color: var(--cyan-neon);
+    text-shadow: 0 0 10px rgba(0, 243, 255, 0.8), 0 0 20px rgba(0, 243, 255, 0.4);
+    line-height: 1.1;
+    margin: 0;
+}
+
+.hud-brand-subtitle {
+    font-family: var(--font-hud);
+    font-size: 0.65rem;
+    letter-spacing: 3px;
+    color: rgba(0, 212, 255, 0.65);
+    text-transform: uppercase;
+}
+
+/* Digital Clock & Date */
+.top-right-clock {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+}
+
+.digital-time {
+    font-family: var(--font-hud);
+    font-size: 1.35rem;
+    font-weight: 700;
+    letter-spacing: 2px;
+    color: var(--cyan-neon);
+    text-shadow: var(--cyan-glow);
+}
+
+.digital-date {
+    font-family: var(--font-hud);
+    font-size: 0.7rem;
+    letter-spacing: 1px;
+    color: rgba(0, 212, 255, 0.65);
+}
+
+/* ==========================================================================
+   MAIN WORKSPACE (3 COLUMNS)
+   ========================================================================== */
+.hud-main-workspace {
+    display: grid;
+    grid-template-columns: 240px 1fr 380px;
+    gap: 16px;
+    flex-grow: 1;
+    overflow: hidden;
+    position: relative;
+}
+
+/* Responsive adjustment */
+@media (max-width: 1024px) {
+    .hud-main-workspace {
+        grid-template-columns: 200px 1fr 320px;
+        gap: 10px;
+    }
+}
+
+/* ==========================================================================
+   COMMON HUD PANELS
+   ========================================================================== */
+.hud-panel {
+    background: var(--bg-panel);
+    border: 1px solid var(--cyan-dim);
+    border-radius: 2px;
+    position: relative;
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+}
+
+/* Decorative Sci-Fi Corner Brackets */
+.hud-panel::before {
+    content: '';
+    position: absolute;
+    top: -1px; left: -1px;
+    width: 6px; height: 6px;
+    border-top: 2px solid var(--cyan-neon);
+    border-left: 2px solid var(--cyan-neon);
+    pointer-events: none;
+}
+
+.hud-panel::after {
+    content: '';
+    position: absolute;
+    bottom: -1px; right: -1px;
+    width: 6px; height: 6px;
+    border-bottom: 2px solid var(--cyan-neon);
+    border-right: 2px solid var(--cyan-neon);
+    pointer-events: none;
+}
+
+.panel-header {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 10px;
+    border-bottom: 1px solid rgba(0, 212, 255, 0.15);
+    background: rgba(0, 212, 255, 0.04);
+}
+
+.panel-caret {
+    font-size: 0.8rem;
+    color: var(--cyan-neon);
+}
+
+.panel-name {
+    font-family: var(--font-hud);
+    font-size: 0.78rem;
+    font-weight: 700;
+    letter-spacing: 2px;
+    color: var(--cyan-neon);
+    text-transform: uppercase;
+    text-shadow: 0 0 6px rgba(0, 243, 255, 0.5);
+}
+
+/* ==========================================================================
+   LEFT COLUMN: SYS MONITOR & STATUS
+   ========================================================================== */
+.hud-left-column {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    overflow: hidden;
+}
+
+.sys-monitor-box {
+    display: flex;
+    flex-direction: column;
+}
+
+.monitor-metrics {
+    padding: 12px 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.metric-row {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.metric-info {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    font-size: 0.82rem;
+    font-family: var(--font-hud);
+}
+
+.metric-label {
+    color: rgba(0, 212, 255, 0.75);
+    letter-spacing: 1px;
+}
+
+.metric-val {
+    color: var(--cyan-bright);
+    font-weight: 700;
+    letter-spacing: 1px;
+}
+
+.metric-val.amber-val { color: var(--amber-neon); }
+.metric-val.green-val { color: var(--green-neon); }
+.metric-val.orange-val { color: var(--orange-neon); }
+.metric-val.red-val { color: var(--red-alert); }
+
+.metric-track {
+    width: 100%;
+    height: 5px;
+    background: rgba(0, 20, 35, 0.7);
+    border: 1px solid rgba(0, 212, 255, 0.2);
+    border-radius: 1px;
+    overflow: hidden;
+    position: relative;
+}
+
+.metric-bar {
+    height: 100%;
+    transition: width 0.4s ease;
+}
+
+.cpu-bar { background: var(--cyan-bright); box-shadow: 0 0 6px var(--cyan-bright); }
+.ram-bar { background: var(--amber-neon); box-shadow: 0 0 6px var(--amber-neon); }
+.net-bar { background: var(--green-neon); box-shadow: 0 0 6px var(--green-neon); }
+.gpu-bar { background: var(--orange-neon); box-shadow: 0 0 6px var(--orange-neon); }
+.temp-bar { background: var(--red-alert); box-shadow: 0 0 6px var(--red-alert); }
+
+/* Footer Specs: UP, PROC, OS */
+.monitor-footer-specs {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    padding: 8px 10px;
+    border-top: 1px solid rgba(0, 212, 255, 0.15);
+    background: rgba(0, 212, 255, 0.02);
+    text-align: center;
+}
+
+.spec-col {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.spec-label {
+    font-size: 0.65rem;
+    color: rgba(0, 212, 255, 0.55);
+}
+
+.spec-val {
+    font-size: 0.78rem;
+    font-weight: 700;
+    color: var(--cyan-bright);
+}
+
+/* Status Chips Group */
+.left-status-group {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-top: auto;
+}
+
+.status-chip {
+    border: 1px solid var(--cyan-dim);
+    background: rgba(0, 15, 25, 0.6);
+    padding: 6px 10px;
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.75rem;
+    letter-spacing: 1px;
+    border-radius: 2px;
+}
+
+.status-chip.active-chip {
+    border-color: rgba(0, 255, 157, 0.4);
+    box-shadow: 0 0 8px rgba(0, 255, 157, 0.15);
+}
+
+.chip-label {
+    color: rgba(0, 212, 255, 0.6);
+}
+
+.text-green { color: var(--green-neon); text-shadow: 0 0 6px rgba(0, 255, 157, 0.7); }
+.text-cyan { color: var(--cyan-neon); text-shadow: 0 0 6px rgba(0, 243, 255, 0.7); }
+
+.left-action-links {
+    display: flex;
+    justify-content: space-between;
+    padding: 4px 2px;
+}
+
+.text-link-btn {
+    background: transparent;
+    border: none;
+    color: rgba(0, 212, 255, 0.55);
+    font-family: var(--font-hud);
+    font-size: 0.72rem;
+    cursor: pointer;
+    transition: color 0.2s ease;
+}
+
+.text-link-btn:hover {
+    color: var(--cyan-neon);
+    text-shadow: var(--cyan-glow);
+}
+
+/* ==========================================================================
+   CENTER COLUMN: HOLOGRAPHIC 3D CELESTIAL CORE
+   ========================================================================== */
+.hud-center-column {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+    overflow: hidden;
+}
+
+.holo-core-viewport {
+    width: 100%;
+    flex-grow: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+    cursor: pointer;
+    pointer-events: auto;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+}
+
+#holo-sphere-canvas {
+    width: 100%;
+    height: 100%;
+    display: block;
+    cursor: pointer;
+    pointer-events: auto;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+}
+
+/* Core Status Bar & Audio Waveform */
+.core-status-bar {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    padding-bottom: 14px;
+    position: relative;
+    z-index: 100;
+    pointer-events: auto;
+}
+
+.status-mode-pill {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 5px 16px;
+    border-radius: 4px;
+    font-family: var(--font-hud);
+    font-size: 0.82rem;
+    letter-spacing: 2px;
+    transition: all 0.2s ease;
+    cursor: pointer !important;
+    pointer-events: auto !important;
+    touch-action: manipulation;
+    user-select: none;
+    -webkit-tap-highlight-color: transparent;
+    position: relative;
+    z-index: 105 !important;
+    background: transparent;
+    border: none;
+    outline: none;
+    -webkit-appearance: none;
+    appearance: none;
+}
+
+.status-mode-pill * {
+    pointer-events: none;
+}
+
+.status-mode-pill:hover {
+    filter: brightness(1.25);
+    transform: scale(1.03);
+}
+
+.status-mode-pill:active {
+    transform: scale(0.97);
+    filter: brightness(0.9);
+}
+
+.status-mode-pill.muted {
+    border: 1px solid var(--red-muted-border);
+    background: var(--red-muted-bg);
+    color: var(--red-alert);
+    box-shadow: 0 0 10px rgba(255, 42, 109, 0.25);
+}
+
+.status-mode-pill.active {
+    border: 1px solid rgba(0, 243, 255, 0.6);
+    background: rgba(0, 243, 255, 0.1);
+    color: var(--cyan-neon);
+    box-shadow: var(--cyan-glow);
+}
+
+.status-mode-pill.listening {
+    border: 1px solid rgba(0, 255, 157, 0.6);
+    background: rgba(0, 255, 157, 0.12);
+    color: var(--green-neon);
+    box-shadow: 0 0 12px rgba(0, 255, 157, 0.4);
+}
+
+.status-mode-pill.speaking {
+    border: 1px solid rgba(0, 240, 255, 0.85);
+    background: rgba(0, 240, 255, 0.16);
+    color: #ffffff;
+    box-shadow: 0 0 16px rgba(0, 243, 255, 0.7);
+}
+
+.status-mode-pill.processing {
+    border: 1px solid rgba(255, 183, 3, 0.7);
+    background: rgba(255, 183, 3, 0.12);
+    color: var(--amber-neon);
+    box-shadow: 0 0 12px rgba(255, 183, 3, 0.4);
+}
+
+.status-mode-pill.standby,
+.status-mode-pill.resting {
+    border: 1px solid rgba(255, 183, 3, 0.6);
+    background: rgba(255, 183, 3, 0.08);
+    color: var(--amber-neon);
+    box-shadow: 0 0 10px rgba(255, 183, 3, 0.25);
+}
+
+/* Waveform Dots Line */
+.waveform-dots {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    height: 10px;
+}
+
+.waveform-dots .dot {
+    width: 3px;
+    height: 3px;
+    background: var(--red-alert);
+    border-radius: 50%;
+    opacity: 0.7;
+    transition: transform 0.08s ease, background 0.2s ease, box-shadow 0.2s ease;
+}
+
+.status-mode-pill.active ~ .waveform-dots .dot,
+.status-mode-pill.listening ~ .waveform-dots .dot,
+.status-mode-pill.speaking ~ .waveform-dots .dot {
+    background: var(--cyan-neon);
+    box-shadow: 0 0 4px var(--cyan-neon);
+}
+
+.status-mode-pill.processing ~ .waveform-dots .dot {
+    background: var(--amber-neon);
+    box-shadow: 0 0 4px var(--amber-neon);
+}
+
+/* Animação pontilhada pulsante */
+@keyframes wavePulse {
+    0%, 100% { transform: scaleY(1); opacity: 0.4; }
+    50% { transform: scaleY(3); opacity: 1; }
+}
+
+.waveform-dots.animating .dot {
+    animation: wavePulse 1.2s infinite ease-in-out;
+}
+
+.waveform-dots.animating .dot:nth-child(2n) { animation-delay: 0.15s; }
+.waveform-dots.animating .dot:nth-child(3n) { animation-delay: 0.3s; }
+.waveform-dots.animating .dot:nth-child(4n) { animation-delay: 0.45s; }
+
+/* ==========================================================================
+   RIGHT COLUMN: ACTIVITY LOG, FILE UPLOAD & COMMAND INPUT
+   ========================================================================== */
+.hud-right-column {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    overflow: hidden;
+}
+
+/* Activity Log Box */
+.activity-log-box {
+    display: flex;
+    flex-direction: column;
+    flex-grow: 1;
+    min-height: 220px;
+    max-height: 48vh;
+}
+
+.log-stream-container {
+    flex-grow: 1;
+    padding: 10px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    font-size: 0.8rem;
+    line-height: 1.35;
+    scroll-behavior: smooth;
+}
+
+.log-line {
+    word-break: break-word;
+    overflow-wrap: anywhere;
+    opacity: 0.9;
+}
+
+.log-line pre {
+    white-space: pre-wrap;
+    word-wrap: break-word;
+    background: rgba(0, 0, 0, 0.4);
+    padding: 8px;
+    border: 1px solid var(--cyan-subtle);
+    border-radius: 4px;
+    margin: 4px 0;
+    overflow-x: auto;
+}
+
+.log-line code {
+    font-family: var(--font-hud);
+    background: rgba(0, 0, 0, 0.4);
+    padding: 2px 4px;
+    border-radius: 2px;
+}
+
+.log-line img, .log-line video {
+    max-width: 100%;
+    height: auto;
+}
+
+.log-line.sys {
+    color: rgba(0, 212, 255, 0.75);
+}
+
+.log-line.user {
+    color: #ffffff;
+    font-weight: 600;
+}
+
+.log-line.jarvis {
+    color: var(--cyan-neon);
+    text-shadow: 0 0 5px rgba(0, 243, 255, 0.4);
+}
+
+.log-line.warn {
+    color: var(--amber-neon);
+}
+
+.log-line.error {
+    color: var(--red-alert);
+}
+
+.log-line.success {
+    color: var(--green-neon);
+}
+
+/* File Upload Box */
+.file-upload-box {
+    flex-shrink: 0;
+    cursor: pointer;
+    transition: border-color 0.2s ease, background 0.2s ease;
+}
+
+.file-upload-box:hover, .file-upload-box.drag-over {
+    border-color: var(--cyan-neon);
+    background: rgba(0, 212, 255, 0.08);
+}
+
+.dropzone-content {
+    padding: 10px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    gap: 4px;
+    border: 1px dashed rgba(0, 212, 255, 0.3);
+    margin: 6px;
+    border-radius: 2px;
+}
+
+.upload-arrow-icon {
+    width: 32px;
+    height: 32px;
+    border: 1px solid var(--cyan-dim);
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--cyan-bright);
+    margin-bottom: 2px;
+}
+
+.drop-text-primary {
+    font-size: 0.75rem;
+    color: rgba(0, 212, 255, 0.9);
+}
+
+.highlight-cyan {
+    color: var(--cyan-neon);
+    text-decoration: underline;
+    text-shadow: var(--cyan-glow);
+}
+
+.drop-text-sub {
+    font-size: 0.65rem;
+    color: rgba(0, 212, 255, 0.5);
+    letter-spacing: 0.5px;
+}
+
+.file-status-label {
+    font-size: 0.62rem;
+    color: rgba(0, 212, 255, 0.4);
+    margin-top: 2px;
+}
+
+/* Command Input & Actions */
+.command-input-box {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 8px;
+    flex-shrink: 0;
+    position: relative;
+    z-index: 20;
+}
+
+.input-line-wrapper {
+    display: flex;
+    align-items: center;
+    background: rgba(0, 15, 25, 0.85);
+    border: 1px solid var(--cyan-dim);
+    border-radius: 2px;
+    padding: 4px 6px 4px 10px;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.input-line-wrapper:focus-within {
+    border-color: var(--cyan-neon);
+    box-shadow: 0 0 10px rgba(0, 243, 255, 0.35);
+}
+
+.sci-fi-input {
+    flex-grow: 1;
+    background: transparent;
+    border: none;
+    outline: none;
+    color: var(--cyan-neon);
+    font-family: var(--font-hud);
+    font-size: 0.85rem;
+    letter-spacing: 1px;
+}
+
+.sci-fi-input::placeholder {
+    color: rgba(0, 212, 255, 0.4);
+}
+
+.sci-fi-send-btn {
+    background: transparent;
+    border: none;
+    color: var(--cyan-neon);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 4px 8px;
+    transition: transform 0.2s ease, color 0.2s ease;
+}
+
+.sci-fi-send-btn:hover {
+    color: #fff;
+    transform: scale(1.15);
+}
+
+/* Control Actions Row: INTERRUPT & MICROPHONE */
+.control-actions-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    position: relative;
+    z-index: 25;
+}
+
+.action-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 7px 6px;
+    font-family: var(--font-hud);
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 1px;
+    border-radius: 2px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    text-transform: uppercase;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+    z-index: 30;
+    pointer-events: auto;
+}
+
+.action-btn * {
+    pointer-events: none;
+}
+
+.action-btn:active {
+    transform: scale(0.96);
+    filter: brightness(1.25);
+}
+
+.btn-interrupt {
+    background: rgba(255, 42, 109, 0.08);
+    border: 1px solid rgba(255, 42, 109, 0.5);
+    color: var(--red-alert);
+}
+
+.btn-interrupt:hover {
+    background: rgba(255, 42, 109, 0.2);
+    box-shadow: 0 0 10px rgba(255, 42, 109, 0.4);
+    color: #fff;
+}
+
+.btn-interrupt .btn-sub {
+    font-size: 0.62rem;
+    opacity: 0.75;
+}
+
+.btn-mic.muted {
+    background: var(--red-muted-bg);
+    border: 1px solid var(--red-muted-border);
+    color: var(--red-alert);
+}
+
+.btn-mic.muted:hover {
+    background: rgba(255, 42, 109, 0.2);
+    box-shadow: 0 0 10px rgba(255, 42, 109, 0.4);
+}
+
+.btn-mic.starting {
+    background: rgba(255, 183, 3, 0.15);
+    border: 1px solid var(--amber-neon);
+    color: var(--amber-neon);
+    box-shadow: 0 0 10px rgba(255, 183, 3, 0.4);
+}
+
+/* ==========================================================================
+   MOBILE & RESPONSIVE TWEAKS
+   ========================================================================== */
+.btn-mic.active {
+    background: rgba(0, 243, 255, 0.12);
+    border: 1px solid var(--cyan-neon);
+    color: var(--cyan-neon);
+    box-shadow: var(--cyan-glow);
+}
+
+.btn-mic.active:hover {
+    background: rgba(0, 243, 255, 0.25);
+    color: #fff;
+}
+
+.btn-mic.active .mic-svg line:first-child {
+    display: none;
+}
+
+/* Footer Credits */
+.hud-footer-credits {
+    text-align: right;
+    font-size: 0.65rem;
+    color: rgba(0, 212, 255, 0.35);
+    letter-spacing: 1px;
+    padding-top: 2px;
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+    width: 3px;
+    height: 3px;
+}
+
+::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+    background: rgba(0, 212, 255, 0.25);
+    border-radius: 1px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: var(--cyan-neon);
+}
+
+
+
+/* Responsividade para o Mobile - Empilhamento Vertical Otimizado */
+@media (max-width: 768px) {
+    body {
+        height: 100vh;
+        height: 100dvh;
+    }
+
+    .hud-root {
+        padding: 6px 8px;
+        gap: 8px;
+        height: 100vh;
+        height: 100dvh;
+    }
+
+    .hud-top-bar {
+        grid-template-columns: auto 1fr;
+        gap: 8px;
+        padding: 2px 6px;
+        text-align: center;
+    }
+
+    .hud-brand-title {
+        font-size: 1.25rem;
+        letter-spacing: 4px;
+    }
+
+    .top-left-controls {
+        justify-content: flex-start;
+    }
+
+    .top-right-clock {
+        display: none; /* Oculta relógio no mobile para economizar espaço de topo */
+    }
+
+    .hud-main-workspace {
+        display: flex;
+        flex-direction: column;
+        position: relative;
+        overflow-y: auto;
+        overflow-x: hidden;
+        padding-bottom: 24px;
+        gap: 12px;
+    }
+
+    /* 1. Orbe 3D compacto no topo */
+    .hud-center-column {
+        order: 1;
+        min-height: 250px;
+        max-height: 40vh;
+        width: 100%;
+        margin-bottom: 4px;
+        flex-shrink: 0;
+        position: relative;
+        z-index: 10;
+    }
+
+    .holo-core-viewport {
+        min-height: 220px;
+        max-height: 38vh;
+        cursor: pointer;
+        pointer-events: auto !important;
+        touch-action: manipulation;
+    }
+
+    #holo-sphere-canvas {
+        cursor: pointer;
+        pointer-events: auto !important;
+        touch-action: manipulation;
+    }
+
+    .core-status-bar {
+        padding-bottom: 6px;
+        gap: 6px;
+        position: relative;
+        z-index: 100;
+        pointer-events: auto;
+    }
+
+    /* 2. Chat, Input de Comando e Botões de Voz logo abaixo do orbe! */
+    .hud-right-column {
+        order: 2;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        width: 100%;
+        box-sizing: border-box;
+        position: relative;
+        z-index: 15;
+    }
+
+    .activity-log-box {
+        min-height: 160px;
+        max-height: 28vh;
+    }
+
+    .command-input-box {
+        padding: 6px;
+        position: relative;
+        z-index: 25;
+    }
+
+    .input-line-wrapper {
+        display: flex;
+        flex-direction: row;
+        gap: 6px;
+        padding: 6px 10px;
+        position: relative;
+        z-index: 26;
+    }
+
+    .sci-fi-input {
+        flex: 1 1 auto;
+        min-width: 0;
+        font-size: 16px; /* Evita zoom automático no iOS Safari */
+    }
+    
+    .sci-fi-send-btn {
+        flex: 0 0 auto;
+        padding: 8px 12px;
+        touch-action: manipulation;
+    }
+
+    .control-actions-row {
+        display: flex;
+        flex-direction: row;
+        gap: 8px;
+        width: 100%;
+        position: relative;
+        z-index: 30;
+    }
+
+    .action-btn {
+        min-height: 52px; /* Altura ergonômica ideal para toque móvel */
+        font-size: 0.8rem;
+        padding: 10px 8px;
+        white-space: nowrap;
+        touch-action: manipulation;
+        border-radius: 4px;
+        -webkit-tap-highlight-color: transparent;
+        position: relative;
+        z-index: 35;
+        pointer-events: auto;
+        cursor: pointer;
+    }
+
+    .btn-interrupt, .btn-mic {
+        flex: 1;
+        position: relative;
+        z-index: 35;
+        pointer-events: auto;
+        cursor: pointer;
+    }
+
+    /* 3. Monitores de hardware e upload no final para acesso por rolagem */
+    .hud-left-column {
+        order: 3;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        width: 100%;
+        box-sizing: border-box;
+    }
+
+    .file-upload-box {
+        order: 4;
+    }
+
+    .hud-panel, .input-line-wrapper {
+        width: 100%;
+        box-sizing: border-box;
+    }
+
+    #core-state-indicator {
+        min-height: 44px;
+        padding: 8px 20px;
+        cursor: pointer !important;
+        pointer-events: auto !important;
+        touch-action: manipulation;
+        position: relative;
+        z-index: 105 !important;
+    }
+
+    /* Modo Recolhido (Mobile Collapsed) */
+    .hud-main-workspace.mobile-collapsed .hud-left-column,
+    .hud-main-workspace.mobile-collapsed .activity-log-box,
+    .hud-main-workspace.mobile-collapsed .file-upload-box,
+    .hud-main-workspace.mobile-collapsed .command-input-box {
+        display: none !important;
+    }
+
+    .hud-main-workspace.mobile-collapsed {
+        justify-content: center;
+        align-items: center;
+    }
+
+    .hud-main-workspace.mobile-collapsed .holo-core-viewport {
+        max-height: 60vh;
+        min-height: 350px;
+    }
+
+    .hud-main-workspace.mobile-collapsed .hud-center-column {
+        flex: 1;
+        justify-content: center;
+        max-height: 100%;
+        margin-top: 10vh; /* Centraliza a esfera verticalmente */
+    }
+}

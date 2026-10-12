@@ -1,0 +1,10 @@
+[Desktop Entry]
+Name=JARVIS
+Comment=Assistente de Inteligência Artificial Pessoal (PC Node)
+Exec=start-jarvis
+Icon=com.jarvis.Node
+Terminal=false
+Type=Application
+Categories=Utility;
+X-GNOME-Autostart-enabled=true
+X-KDE-autostart-after=panel

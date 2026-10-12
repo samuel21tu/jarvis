@@ -1,0 +1,37 @@
+# Deploy do Jarvis Hub no CasaOS
+name: jarvis
+
+services:
+  jarvis-hub:
+    build: .
+    image: jarvis-hub:latest
+    container_name: jarvis-hub
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      - OBSIDIAN_VAULT_PATH=/data/obsidian_vault
+      - MEMORY_DB_PATH=/data/memory/jarvis_memory.db
+      - TZ=America/Sao_Paulo
+    ports:
+      - "8080:8080"
+    security_opt:
+      - no-new-privileges:true
+    volumes:
+      # Cérebro digital (notas/conhecimento)
+      - /DATA/AppData/jarvis/obsidian_vault:/data/obsidian_vault
+      # Memória conversacional (SQLite), isolada das notas
+      - /DATA/AppData/jarvis/memory:/data/memory
+
+x-casaos:
+  architectures: [amd64]
+  main: jarvis-hub
+  author: samuel
+  category: Utilities
+  description:
+    en_us: Jarvis Nexus Hub - Personal AI Assistant
+  tagline:
+    en_us: Personal AI Assistant HUD
+  title:
+    en_us: JARVIS
+  port_map: "8080"
+  index: /

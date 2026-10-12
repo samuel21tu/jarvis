@@ -1,0 +1,53 @@
+{
+    "app-id": "com.jarvis.Node",
+    "runtime": "org.gnome.Platform",
+    "runtime-version": "50",
+    "sdk": "org.gnome.Sdk",
+    "command": "start-jarvis",
+    "finish-args": [
+        "--share=network",
+        "--socket=wayland",
+        "--socket=fallback-x11",
+        "--socket=pulseaudio",
+        "--talk-name=org.kde.StatusNotifierWatcher",
+        "--talk-name=org.freedesktop.Notifications",
+        "--talk-name=org.freedesktop.Flatpak",
+        "--system-talk-name=org.freedesktop.systemd1",
+        "--filesystem=home"
+    ],
+    "modules": [
+        {
+            "name": "python3-dependencies",
+            "buildsystem": "simple",
+            "build-options": {
+                "build-args": [
+                    "--share=network"
+                ]
+            },
+            "build-commands": [
+                "pip3 install --prefix=/app pystray pillow websockets psutil pywebview"
+            ]
+        },
+        {
+            "name": "jarvis-node",
+            "buildsystem": "simple",
+            "build-commands": [
+                "mkdir -p /app/bin",
+                "mkdir -p /app/src/node",
+                "mkdir -p /app/share/applications",
+                "mkdir -p /app/share/icons/hicolor/512x512/apps",
+                "cp com.jarvis.Node.desktop /app/share/applications/com.jarvis.Node.desktop",
+                "cp com.jarvis.Node.png /app/share/icons/hicolor/512x512/apps/com.jarvis.Node.png",
+                "cp src/node/*.py /app/src/node/",
+                "cat << 'EOF' > /app/bin/start-jarvis\n#!/bin/sh\nexport PYTHONPATH=/app/src\npython3 /app/src/node/jarvis_tray.py\nEOF",
+                "chmod +x /app/bin/start-jarvis"
+            ],
+            "sources": [
+                {
+                    "type": "dir",
+                    "path": "."
+                }
+            ]
+        }
+    ]
+}

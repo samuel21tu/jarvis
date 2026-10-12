@@ -1,0 +1,13 @@
+fastapi
+uvicorn
+google-genai
+websockets
+pydantic
+pydantic-settings
+python-dotenv
+psutil
+tenacity
+edge-tts
+gTTS
+aiohttp
+

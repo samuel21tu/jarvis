@@ -1,0 +1,12 @@
+<!DOCTYPE html>
+<html>
+<body>
+<script>
+setTimeout(() => {
+    let url = "https://translate.google.com/translate_tts?ie=UTF-8&q=" + encodeURIComponent("Testando a voz do Google Translate em modo fantasma") + "&tl=pt-BR&client=tw-ob";
+    let audio = new Audio(url);
+    audio.play().then(() => console.log("Áudio tocando")).catch(e => console.error(e));
+}, 1000);
+</script>
+</body>
+</html>
