@@ -12,11 +12,32 @@ from src.hub.core.websocket import manager
 from src.hub.core.obsidian import obsidian_brain
 from src.hub.core.memory import memory
 
-# Inicialização do cliente oficial Google GenAI
-client = genai.Client(api_key=settings.gemini_api_key)
+# Cliente criado sob demanda para permitir operar somente com OpenRouter.
+client = None
+
+
+def _cliente_gemini():
+    """Inicializa o cliente Gemini apenas quando ele for realmente usado."""
+    global client
+    if client is None:
+        if not settings.gemini_api_key:
+            raise RuntimeError("GEMINI_API_KEY não configurada")
+        client = genai.Client(api_key=settings.gemini_api_key)
+    return client
 
 # Dicionário de futures para requisições assíncronas aos nós de execução
 pending_requests: Dict[str, asyncio.Future] = {}
+
+# Despachantes remotos para ordens enviadas do Nó Local para o Servidor
+remote_server_command_dispatcher = None
+remote_server_status_dispatcher = None
+
+
+def set_remote_server_dispatchers(cmd_dispatcher, status_dispatcher):
+    """Registra os manipuladores de envio de comandos do Nó Local para o Servidor via WebSocket."""
+    global remote_server_command_dispatcher, remote_server_status_dispatcher
+    remote_server_command_dispatcher = cmd_dispatcher
+    remote_server_status_dispatcher = status_dispatcher
 
 
 def is_retryable_error(exc: Exception) -> bool:
@@ -36,7 +57,7 @@ def is_retryable_error(exc: Exception) -> bool:
 async def safe_generate_content(model: str, contents: list, config: types.GenerateContentConfig):
     """Executa a requisição ao modelo em thread separada para não bloquear o Event Loop do FastAPI."""
     return await asyncio.to_thread(
-        client.models.generate_content,
+        _cliente_gemini().models.generate_content,
         model=model,
         contents=contents,
         config=config
@@ -45,11 +66,38 @@ async def safe_generate_content(model: str, contents: list, config: types.Genera
 
 async def execute_command(target: str, cmd: str) -> str:
     """Envia um comando Bash/Shell para o nó de execução ou para o próprio servidor."""
-    selected_target = target.lower()
+    selected_target = (target or "").lower().strip()
+    is_server = (settings.node_role != "local" and remote_server_command_dispatcher is None)
 
-    if selected_target == "server" or selected_target == "servidor":
-        await manager.stream_log_to_mobile(f"Executando no terminal (Servidor/Hub): '{cmd}'...", level="warn")
+    # 1. Ordem direcionada ao SERVIDOR CasaOS
+    if selected_target in ("server", "servidor", "hub"):
+        if is_server:
+            await manager.stream_log_to_mobile(f"Executando no terminal (Servidor CasaOS): '{cmd}'...", level="warn")
+            try:
+                import subprocess
+                result = await asyncio.to_thread(
+                    subprocess.run, cmd, shell=True, capture_output=True, text=True, timeout=50.0
+                )
+                output = ""
+                if result.stdout: output += f"STDOUT:\n{result.stdout}\n"
+                if result.stderr: output += f"STDERR:\n{result.stderr}\n"
+                if not output: output = f"Command exited with code {result.returncode} but no output."
+                await manager.stream_log_to_mobile("Comando concluído no Servidor.", level="success")
+                return output
+            except Exception as e:
+                return f"Erro local no servidor: {e}"
+        else:
+            # Enviado do Nó Local para o Servidor via WebSocket
+            if remote_server_command_dispatcher:
+                return await remote_server_command_dispatcher(cmd)
+            return "Erro: Conexão com o Servidor CasaOS indisponível para executar a ordem."
+
+    # 2. Ordem direcionada ao PC LOCAL
+    if not is_server:
         try:
+            from src.node.jarvis_node import execute_command as local_exec
+            return local_exec(cmd)
+        except Exception:
             import subprocess
             result = await asyncio.to_thread(
                 subprocess.run, cmd, shell=True, capture_output=True, text=True, timeout=50.0
@@ -57,12 +105,9 @@ async def execute_command(target: str, cmd: str) -> str:
             output = ""
             if result.stdout: output += f"STDOUT:\n{result.stdout}\n"
             if result.stderr: output += f"STDERR:\n{result.stderr}\n"
-            if not output: output = f"Command exited with code {result.returncode} but no output."
-            await manager.stream_log_to_mobile(f"Comando concluído no Servidor.", level="success")
-            return output
-        except Exception as e:
-            return f"Erro local no servidor: {e}"
+            return output or f"Command exited with code {result.returncode}."
 
+    # 3. Estamos no Servidor e o alvo é o PC (Nó conectado)
     if selected_target not in manager.active_nodes:
         if manager.active_nodes:
             fallback_target = list(manager.active_nodes.keys())[0]
@@ -103,8 +148,37 @@ async def execute_command(target: str, cmd: str) -> str:
 
 
 async def get_system_status(target: str) -> str:
-    """Solicita métricas de hardware (CPU, RAM, Disco, Temperatura) ao nó."""
-    selected_target = target
+    """Solicita métricas de hardware (CPU, RAM, Disco, Temperatura) ao nó ou ao servidor."""
+    selected_target = (target or "").lower().strip()
+    is_server = (settings.node_role != "local" and remote_server_status_dispatcher is None)
+
+    # 1. Status do SERVIDOR CasaOS
+    if selected_target in ("server", "servidor", "hub"):
+        if is_server:
+            import psutil
+            cpu = psutil.cpu_percent(interval=None)
+            ram = psutil.virtual_memory()
+            disk = psutil.disk_usage('/')
+            return (
+                f"Status do Servidor CasaOS:\n"
+                f"CPU: {cpu}%\n"
+                f"RAM: {ram.percent}% ({ram.used // (1024**2)}MB / {ram.total // (1024**2)}MB)\n"
+                f"Disco: {disk.percent}%"
+            )
+        else:
+            if remote_server_status_dispatcher:
+                return await remote_server_status_dispatcher()
+            return "Erro: Conexão remota com o Servidor CasaOS indisponível."
+
+    # 2. Status do PC LOCAL
+    if not is_server:
+        try:
+            from src.node.jarvis_node import get_system_status as local_status
+            return local_status()
+        except Exception as e:
+            return f"Erro ao coletar status local: {e}"
+
+    # 3. Estamos no Servidor e o alvo é o PC conectado
     if selected_target not in manager.active_nodes:
         if manager.active_nodes:
             selected_target = list(manager.active_nodes.keys())[0]
@@ -167,12 +241,12 @@ AVAILABLE_TOOLS = {
 
 # Schemas de declaração para o SDK do Gemini (usadas para extração de schema de tools)
 def execute_command_schema(target: str, cmd: str) -> str:
-    """Executa comandos nativos no terminal. O target pode ser 'server' (para o servidor/hub) ou um node_id do PC (ex: 'cachyos_linux')."""
+    """Executa comandos nativos no terminal Bash/Shell. Use target='server' para executar no Servidor (CasaOS) ou target='pc' (ou 'local') para executar no PC local."""
     pass
 execute_command_schema.__name__ = "execute_command"
 
 def get_system_status_schema(target: str) -> str:
-    """Obtém o status atual do computador (uso de CPU, porcentagem de memória RAM, espaço em disco e temperaturas)."""
+    """Obtém o status de hardware e sistema operacional (CPU, RAM, disco, temperatura). Use target='server' para o Servidor CasaOS ou target='pc' para o PC local."""
     pass
 get_system_status_schema.__name__ = "get_system_status"
 
@@ -274,12 +348,45 @@ Data/hora atual: {datetime.now().strftime('%d/%m/%Y %H:%M')}"""
 
 
 async def chat_with_nexus(prompt: str, history: list, origin: str = "server", attachments: list = None) -> str:
-    """Gerencia a conversa com o Gemini com suporte a visão multimodal (análise de imagens/documentos) e ferramentas."""
+    """Gerencia conversa multimodal com provider configurável e fallback seguro."""
     import base64
+    from src.hub.core.llm_providers import OpenRouterProvider, LLMProviderError, mensagens_openrouter
 
-    # Configuração de modelos Gemini oficiais e disponíveis com cota ativa
-    active_model = 'gemini-flash-latest'
-    fallback_models = ['gemini-3.5-flash', 'gemini-flash-lite-latest', 'gemini-3.5-flash-lite']
+    # O provider principal é configurável; Gemini permanece como fallback compatível.
+    modelos_gemini = settings.modelos_gemini()
+    active_model = modelos_gemini[0] if modelos_gemini else 'gemini-flash-latest'
+    fallback_models = modelos_gemini[1:] or ['gemini-3.5-flash', 'gemini-flash-lite-latest', 'gemini-3.5-flash-lite']
+
+    if settings.llm_provider.strip().lower() == "openrouter":
+        try:
+            from src.hub.core.llm_providers import OpenRouterProvider, LLMProviderError, mensagens_openrouter
+            mensagens = mensagens_openrouter(history, build_system_prompt(origin), prompt, attachments)
+            provider = OpenRouterProvider(settings.openrouter_api_key, settings.openrouter_base_url, settings.llm_timeout_seconds, settings.openrouter_http_referer, settings.openrouter_x_title)
+            for modelo in settings.modelos_openrouter():
+                try:
+                    resposta = await provider.generate(modelo, mensagens, jarvis_tools)
+                    if not resposta.tool_calls:
+                        return resposta.text or "Comando processado com sucesso pelos meus sistemas, senhor."
+                    import json
+                    mensagens.append({"role": "assistant", "content": resposta.assistant_content, "tool_calls": [{"id": c.call_id, "type": "function", "function": {"name": c.name, "arguments": json.dumps(c.arguments)}} for c in resposta.tool_calls]})
+                    for chamada in resposta.tool_calls:
+                        handler = AVAILABLE_TOOLS.get(chamada.name)
+                        try:
+                            if handler is None:
+                                raise ValueError("ferramenta indisponível")
+                            resultado = await handler(**chamada.arguments) if asyncio.iscoroutinefunction(handler) else handler(**chamada.arguments)
+                        except Exception as erro:
+                            resultado = f"Erro na execução da ferramenta: {type(erro).__name__}"
+                        mensagens.append({"role": "tool", "tool_call_id": chamada.call_id, "name": chamada.name, "content": str(resultado)})
+                    resposta = await provider.generate(modelo, mensagens, jarvis_tools)
+                    if not resposta.tool_calls:
+                        return resposta.text or "Comando processado com sucesso pelos meus sistemas, senhor."
+                except LLMProviderError as erro:
+                    await manager.stream_log_to_mobile(f"OpenRouter indisponível ({erro.status or 'rede'}); tentando Gemini.", level="warn")
+                    if erro.status in (400, 401, 403):
+                        break
+        except Exception as erro:
+            await manager.stream_log_to_mobile(f"Fallback Gemini ativado ({type(erro).__name__}).", level="warn")
 
     await manager.stream_log_to_mobile(f"Processando solicitação com {active_model}...", level="info")
 

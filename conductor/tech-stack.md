@@ -3,7 +3,7 @@
 ## Servidor Central (Hub)
 - **Linguagem & Runtime:** Python 3.11+ / FastAPI
 - **Comunicação:** WebSockets assíncronos (`websockets`, `asyncio`)
-- **Integração de IA:** Google Gemini API (modelos Gemini 2.5 Flash / Pro)
+- **Integração de IA:** Google Gemini API (padrão atual; modelos Gemini 2.5 Flash / Pro) ou OpenRouter em rollout controlado (`LLM_PROVIDER`, `OPENROUTER_BASE_URL` e `OPENROUTER_MODEL`); as chaves são fornecidas somente no ambiente de deploy
 - **Armazenamento de Memória:** SQLite / JSON estruturado / Obsidian Vault integration
 
 ## Interface Cliente Mobile & HUD Web

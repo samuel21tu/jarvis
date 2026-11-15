@@ -40,3 +40,6 @@ build-dir/
 .idea/
 .DS_Store
 Thumbs.db
+
+# Obsidian Vault (notas pessoais)
+obsidian_vault/
