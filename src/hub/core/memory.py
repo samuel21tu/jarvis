@@ -15,8 +15,9 @@ import os
 import re
 import sqlite3
 import threading
+import time
 from datetime import datetime
-from typing import Awaitable, Callable, Dict, List, Optional
+from typing import Any, Awaitable, Callable, Dict, List, Optional
 
 from src.hub.core.config import settings
 
@@ -52,9 +53,10 @@ class MemoryManager:
         return conn
 
     def _exec(self, sql: str, params: tuple = (), many: bool = False):
-        """Executa SQL com lock e reconexão automática se a conexão cair."""
+        """Executa SQL com lock e retentativas automáticas (conexão morta ou DB travado)."""
         with self._lock:
-            for attempt in range(2):
+            attempt = 0
+            while True:
                 try:
                     cur = self._conn.executemany(sql, params) if many else self._conn.execute(sql, params)
                     self._conn.commit()
@@ -64,6 +66,14 @@ class MemoryManager:
                     if attempt:
                         raise
                     self._conn = self._connect()
+                except sqlite3.OperationalError as exc:
+                    # Contenção por outro processo ('database is locked'): backoff curto e retenta.
+                    if "locked" not in str(exc).lower():
+                        raise
+                    if attempt >= 3:
+                        raise
+                    time.sleep(0.05 * (2 ** attempt))
+                attempt += 1
 
     def _init_schema(self):
         with self._lock:
@@ -119,16 +129,24 @@ class MemoryManager:
                 if not match:
                     continue
                 ts = datetime.fromtimestamp(mtime).isoformat(timespec="seconds")
-                rows = [
+                # Dedup por (conversa, papel, created_at, conteúdo): processos que
+                # importam o mesmo arquivo concorrentemente não geram duplicatas.
+                for row in [
                     (MAIN_CONVERSATION, m.get("role", "user"), m.get("content", ""), "migrado", ts)
                     for m in json.loads(match.group(1))
                     if m.get("content")
-                ]
-                self._exec(
-                    "INSERT INTO messages(conversation, role, content, origin, created_at) VALUES (?,?,?,?,?)",
-                    rows, many=True,
-                )
-                imported += len(rows)
+                ]:
+                    ja_existe = self._exec(
+                        "SELECT 1 FROM messages WHERE conversation=? AND role=? AND created_at=? AND content=? LIMIT 1",
+                        (row[0], row[1], row[4], row[2]),
+                    ).fetchone()
+                    if ja_existe:
+                        continue
+                    self._exec(
+                        "INSERT INTO messages(conversation, role, content, origin, created_at) VALUES (?,?,?,?,?)",
+                        row,
+                    )
+                    imported += 1
         except Exception as e:
             print(f"[MEMORY] Falha na migração do Obsidian (seguindo sem ela): {e}")
         self._exec("INSERT OR REPLACE INTO meta(key, value) VALUES ('obsidian_migrated', ?)", (str(imported),))

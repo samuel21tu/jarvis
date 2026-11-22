@@ -1,32 +1,20 @@
 import asyncio
+import json
 import uuid
 from datetime import datetime
 from typing import List, Dict, Any
-from google import genai
-from google.genai import types
-from google.genai import errors
-import tenacity
 
 from src.hub.core.config import settings
 from src.hub.core.websocket import manager
 from src.hub.core.obsidian import obsidian_brain
 from src.hub.core.memory import memory
-
-# Cliente criado sob demanda para permitir operar somente com OpenRouter.
-client = None
-
-
-def _cliente_gemini():
-    """Inicializa o cliente Gemini apenas quando ele for realmente usado."""
-    global client
-    if client is None:
-        if not settings.gemini_api_key:
-            raise RuntimeError("GEMINI_API_KEY não configurada")
-        client = genai.Client(api_key=settings.gemini_api_key)
-    return client
+from src.node.jarvis_node import is_command_safe
 
 # Dicionário de futures para requisições assíncronas aos nós de execução
 pending_requests: Dict[str, asyncio.Future] = {}
+
+# Timeout unificado para requisições peer (Servidor <-> Nó) via WebSocket
+PEER_TIMEOUT = 50.0
 
 # Despachantes remotos para ordens enviadas do Nó Local para o Servidor
 remote_server_command_dispatcher = None
@@ -40,30 +28,6 @@ def set_remote_server_dispatchers(cmd_dispatcher, status_dispatcher):
     remote_server_status_dispatcher = status_dispatcher
 
 
-def is_retryable_error(exc: Exception) -> bool:
-    """Verifica se o erro é passível de retry imediato (excluindo limites estritos de quota diária)."""
-    err_str = str(exc)
-    if "RESOURCE_EXHAUSTED" in err_str or "429" in err_str or "404" in err_str:
-        return False
-    return True
-
-
-@tenacity.retry(
-    stop=tenacity.stop_after_attempt(3),
-    wait=tenacity.wait_exponential(multiplier=1, min=1, max=5),
-    retry=tenacity.retry_if_exception(is_retryable_error),
-    reraise=True
-)
-async def safe_generate_content(model: str, contents: list, config: types.GenerateContentConfig):
-    """Executa a requisição ao modelo em thread separada para não bloquear o Event Loop do FastAPI."""
-    return await asyncio.to_thread(
-        _cliente_gemini().models.generate_content,
-        model=model,
-        contents=contents,
-        config=config
-    )
-
-
 async def execute_command(target: str, cmd: str) -> str:
     """Envia um comando Bash/Shell para o nó de execução ou para o próprio servidor."""
     selected_target = (target or "").lower().strip()
@@ -72,11 +36,14 @@ async def execute_command(target: str, cmd: str) -> str:
     # 1. Ordem direcionada ao SERVIDOR CasaOS
     if selected_target in ("server", "servidor", "hub"):
         if is_server:
+            safe, reason = is_command_safe(cmd)
+            if not safe:
+                return f"Security Error: {reason}"
             await manager.stream_log_to_mobile(f"Executando no terminal (Servidor CasaOS): '{cmd}'...", level="warn")
             try:
                 import subprocess
                 result = await asyncio.to_thread(
-                    subprocess.run, cmd, shell=True, capture_output=True, text=True, timeout=50.0
+                    subprocess.run, cmd, shell=True, capture_output=True, text=True, timeout=PEER_TIMEOUT
                 )
                 output = ""
                 if result.stdout: output += f"STDOUT:\n{result.stdout}\n"
@@ -96,11 +63,14 @@ async def execute_command(target: str, cmd: str) -> str:
     if not is_server:
         try:
             from src.node.jarvis_node import execute_command as local_exec
-            return local_exec(cmd)
+            return await asyncio.to_thread(local_exec, cmd)
         except Exception:
+            safe, reason = is_command_safe(cmd)
+            if not safe:
+                return f"Security Error: {reason}"
             import subprocess
             result = await asyncio.to_thread(
-                subprocess.run, cmd, shell=True, capture_output=True, text=True, timeout=50.0
+                subprocess.run, cmd, shell=True, capture_output=True, text=True, timeout=PEER_TIMEOUT
             )
             output = ""
             if result.stdout: output += f"STDOUT:\n{result.stdout}\n"
@@ -138,7 +108,8 @@ async def execute_command(target: str, cmd: str) -> str:
         return f"Error: Falha no envio da mensagem WebSocket para {selected_target}."
 
     try:
-        result = await asyncio.wait_for(future, timeout=50.0)
+        result = await asyncio.wait_for(future, timeout=PEER_TIMEOUT)
+        pending_requests.pop(req_id, None)
         await manager.stream_log_to_mobile(f"Comando concluído em {selected_target}.", level="success")
         return result
     except asyncio.TimeoutError:
@@ -202,7 +173,8 @@ async def get_system_status(target: str) -> str:
         return "Error: Falha ao enviar requisição de métricas ao nó."
 
     try:
-        result = await asyncio.wait_for(future, timeout=12.0)
+        result = await asyncio.wait_for(future, timeout=PEER_TIMEOUT)
+        pending_requests.pop(req_id, None)
         return result
     except asyncio.TimeoutError:
         pending_requests.pop(req_id, None)
@@ -239,7 +211,7 @@ AVAILABLE_TOOLS = {
     "search_conversations": search_conversations
 }
 
-# Schemas de declaração para o SDK do Gemini (usadas para extração de schema de tools)
+# Schemas das ferramentas (function calling compatível com o roteador de IA)
 def execute_command_schema(target: str, cmd: str) -> str:
     """Executa comandos nativos no terminal Bash/Shell. Use target='server' para executar no Servidor (CasaOS) ou target='pc' (ou 'local') para executar no PC local."""
     pass
@@ -298,14 +270,32 @@ RESUMO ATUAL:
 
 NOVO TRECHO:
 {transcript}"""
-    config = types.GenerateContentConfig(temperature=0.1)
-    for model in ['gemini-flash-latest', 'gemini-3.5-flash', 'gemini-flash-lite-latest']:
-        try:
-            resp = await safe_generate_content(model, [types.Content(role="user", parts=[types.Part.from_text(text=prompt)])], config)
-            if resp.text:
-                return resp.text
-        except Exception as e:
-            print(f"[MEMORY] Resumo falhou com {model}: {e}")
+    from src.hub.core.llm_providers import RouterProvider, LLMProviderError
+
+    mensagens = [{"role": "user", "content": prompt}]
+    modelos = settings.modelos_llm_router()
+    if not modelos:
+        print("[MEMORY] LLM_ROUTER_MODEL não configurada; resumo ignorado")
+        return ""
+
+    provider = RouterProvider(
+        settings.llm_router_api_key,
+        settings.llm_router_base_url,
+        settings.llm_timeout_seconds,
+        settings.llm_router_http_referer,
+        settings.llm_router_x_title,
+        settings.llm_router_allowed_hosts,
+    )
+    try:
+        for model in modelos:
+            try:
+                resposta = await provider.generate(model, mensagens, temperature=0.1)
+                if resposta.text:
+                    return resposta.text
+            except LLMProviderError as erro:
+                print(f"[MEMORY] Resumo falhou com {model}: {erro}")
+    finally:
+        await provider.close()
     return ""
 
 
@@ -348,168 +338,90 @@ Data/hora atual: {datetime.now().strftime('%d/%m/%Y %H:%M')}"""
 
 
 async def chat_with_nexus(prompt: str, history: list, origin: str = "server", attachments: list = None) -> str:
-    """Gerencia conversa multimodal com provider configurável e fallback seguro."""
-    import base64
-    from src.hub.core.llm_providers import OpenRouterProvider, LLMProviderError, mensagens_openrouter
+    """Gerencia conversa multimodal exclusivamente pelo roteador de IA configurado."""
+    from src.hub.core.llm_providers import RouterProvider, LLMProviderError, mensagens_router
 
-    # O provider principal é configurável; Gemini permanece como fallback compatível.
-    modelos_gemini = settings.modelos_gemini()
-    active_model = modelos_gemini[0] if modelos_gemini else 'gemini-flash-latest'
-    fallback_models = modelos_gemini[1:] or ['gemini-3.5-flash', 'gemini-flash-lite-latest', 'gemini-3.5-flash-lite']
+    modelos = settings.modelos_llm_router()
+    if not modelos:
+        return "Senhor, o roteador de IA não está configurado. Defina LLM_ROUTER_MODEL no ambiente."
 
-    if settings.llm_provider.strip().lower() == "openrouter":
-        try:
-            from src.hub.core.llm_providers import OpenRouterProvider, LLMProviderError, mensagens_openrouter
-            mensagens = mensagens_openrouter(history, build_system_prompt(origin), prompt, attachments)
-            provider = OpenRouterProvider(settings.openrouter_api_key, settings.openrouter_base_url, settings.llm_timeout_seconds, settings.openrouter_http_referer, settings.openrouter_x_title)
-            for modelo in settings.modelos_openrouter():
-                try:
-                    resposta = await provider.generate(modelo, mensagens, jarvis_tools)
+    provider = RouterProvider(
+        settings.llm_router_api_key,
+        settings.llm_router_base_url,
+        settings.llm_timeout_seconds,
+        settings.llm_router_http_referer,
+        settings.llm_router_x_title,
+        settings.llm_router_allowed_hosts,
+    )
+
+    try:
+        mensagens = mensagens_router(history, build_system_prompt(origin), prompt, attachments)
+
+        for modelo in modelos:
+            await manager.stream_log_to_mobile(f"Processando solicitação com {modelo}...", level="info")
+            try:
+                resposta = await provider.generate(modelo, mensagens, jarvis_tools)
+
+                # Loop de tool calling com limite de turnos (o roteador devolve tool_calls
+                # no formato Chat Completions, executamos e devolvemos os resultados).
+                for _ in range(6):
                     if not resposta.tool_calls:
                         return resposta.text or "Comando processado com sucesso pelos meus sistemas, senhor."
-                    import json
-                    mensagens.append({"role": "assistant", "content": resposta.assistant_content, "tool_calls": [{"id": c.call_id, "type": "function", "function": {"name": c.name, "arguments": json.dumps(c.arguments)}} for c in resposta.tool_calls]})
+
+                    mensagens.append({
+                        "role": "assistant",
+                        "content": resposta.text or None,
+                        "tool_calls": [
+                            {
+                                "id": chamada.call_id,
+                                "type": "function",
+                                "function": {
+                                    "name": chamada.name,
+                                    "arguments": json.dumps(chamada.arguments, ensure_ascii=False),
+                                },
+                            }
+                            for chamada in resposta.tool_calls
+                        ],
+                    })
+
                     for chamada in resposta.tool_calls:
                         handler = AVAILABLE_TOOLS.get(chamada.name)
+                        await manager.stream_log_to_mobile(
+                            f"Invocando ferramenta: {chamada.name}...", level="warn"
+                        )
                         try:
                             if handler is None:
                                 raise ValueError("ferramenta indisponível")
-                            resultado = await handler(**chamada.arguments) if asyncio.iscoroutinefunction(handler) else handler(**chamada.arguments)
-                        except Exception as erro:
-                            resultado = f"Erro na execução da ferramenta: {type(erro).__name__}"
-                        mensagens.append({"role": "tool", "tool_call_id": chamada.call_id, "name": chamada.name, "content": str(resultado)})
+                            if asyncio.iscoroutinefunction(handler):
+                                resultado = await handler(**chamada.arguments)
+                            else:
+                                resultado = handler(**chamada.arguments)
+                        except Exception as exec_err:
+                            resultado = f"Erro na execução da ferramenta: {type(exec_err).__name__}"
+
+                        mensagens.append({
+                            "role": "tool",
+                            "tool_call_id": chamada.call_id,
+                            "name": chamada.name,
+                            "content": str(resultado),
+                        })
+
                     resposta = await provider.generate(modelo, mensagens, jarvis_tools)
-                    if not resposta.tool_calls:
-                        return resposta.text or "Comando processado com sucesso pelos meus sistemas, senhor."
-                except LLMProviderError as erro:
-                    await manager.stream_log_to_mobile(f"OpenRouter indisponível ({erro.status or 'rede'}); tentando Gemini.", level="warn")
-                    if erro.status in (400, 401, 403):
-                        break
-        except Exception as erro:
-            await manager.stream_log_to_mobile(f"Fallback Gemini ativado ({type(erro).__name__}).", level="warn")
 
-    await manager.stream_log_to_mobile(f"Processando solicitação com {active_model}...", level="info")
+                return resposta.text or "Processamento concluído após múltiplas etapas de sistema, senhor."
 
-    system_prompt = build_system_prompt(origin)
-
-    # Monta histórico de mensagens
-    contents = []
-    for msg in history:
-        role = msg.get('role', 'user')
-        if role not in ['user', 'model']:
-            role = 'user'
-        contents.append(types.Content(role=role, parts=[types.Part.from_text(text=msg.get('content', ''))]))
-
-    # Constrói os componentes da mensagem atual (texto + imagens/anexos)
-    user_parts = []
-    if attachments:
-        for att in attachments:
-            try:
-                b64_str = att.get("data", "")
-                if "," in b64_str:
-                    b64_str = b64_str.split(",", 1)[1]
-                raw_bytes = base64.b64decode(b64_str)
-                mime_type = att.get("mime_type", "image/png")
-                user_parts.append(types.Part.from_bytes(data=raw_bytes, mime_type=mime_type))
-                await manager.stream_log_to_mobile(f"Imagem/Anexo carregado para visão: {att.get('name', 'imagem')}", level="info")
-            except Exception as att_err:
-                print(f"[!] Erro ao processar anexo {att.get('name')}: {att_err}")
-
-    text_content = prompt or "Analise a imagem/conteúdo fornecido e descreva ou leia os detalhes."
-    user_parts.append(types.Part.from_text(text=text_content))
-
-    contents.append(types.Content(role="user", parts=user_parts))
-
-    # Configuração com Automatic Function Calling DESABILITADO
-    config = types.GenerateContentConfig(
-        system_instruction=system_prompt,
-        tools=jarvis_tools,
-        automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
-        temperature=0.2
-    )
-
-    async def execute_model_request(target_model: str, req_contents: list) -> tuple[types.GenerateContentResponse, str]:
-        """Executa a requisição com tolerância a falhas e salva o modelo reserva que obteve sucesso."""
-        try:
-            resp = await safe_generate_content(target_model, req_contents, config)
-            return resp, target_model
-        except Exception as primary_err:
-            err_msg = str(primary_err)
-            if any(k in err_msg for k in ["RESOURCE_EXHAUSTED", "429", "503", "404", "NOT_FOUND", "invalid"]):
-                for fb in fallback_models:
-                    if fb == target_model:
-                        continue
-                    try:
-                        await manager.stream_log_to_mobile(f"Alternando para modelo reserva {fb}...", level="warn")
-                        resp = await safe_generate_content(fb, req_contents, config)
-                        return resp, fb
-                    except Exception:
-                        continue
-                if "RESOURCE_EXHAUSTED" in err_msg or "429" in err_msg:
-                    raise Exception("Senhor, meus subsistemas de processamento estão em sua capacidade máxima no momento e preciso de alguns minutos para resfriá-los. Poderia me dar um instante, por favor?")
-            raise primary_err
-
-    max_turns = 6
-    current_turn = 0
-    current_model = active_model
-
-    try:
-        while current_turn < max_turns:
-            current_turn += 1
-
-            response, used_model = await execute_model_request(current_model, contents)
-            current_model = used_model
-
-            # Se não houver chamadas de ferramentas, retornamos o texto final gerado
-            if not response.function_calls:
-                final_text = response.text or "Comando processado com sucesso pelos meus sistemas, senhor."
-                return final_text
-
-            # Adiciona a resposta do modelo (com as intenções de tool call) ao histórico de contexto
-            if response.candidates and response.candidates[0].content:
-                contents.append(response.candidates[0].content)
-
-            # Executa cada uma das ferramentas requisitadas pelo modelo
-            tool_response_parts = []
-            for function_call in response.function_calls:
-                tool_name = function_call.name
-                tool_args = function_call.args or {}
-
-                await manager.stream_log_to_mobile(f"Invocando ferramenta: {tool_name}...", level="warn")
-
-                if tool_name in AVAILABLE_TOOLS:
-                    handler = AVAILABLE_TOOLS[tool_name]
-                    try:
-                        if asyncio.iscoroutinefunction(handler):
-                            tool_output = await handler(**tool_args)
-                        else:
-                            tool_output = handler(**tool_args)
-                    except Exception as exec_err:
-                        tool_output = f"Erro na execução da ferramenta {tool_name}: {str(exec_err)}"
-                else:
-                    tool_output = f"Erro: Ferramenta '{tool_name}' não disponível no Jarvis."
-
-                tool_response_parts.append(
-                    types.Part.from_function_response(
-                        name=tool_name,
-                        response={"result": str(tool_output)}
-                    )
+            except LLMProviderError as erro:
+                await manager.stream_log_to_mobile(
+                    f"Roteador indisponível com {modelo} ({erro.status or 'rede'}).", level="warn"
                 )
+                if erro.status in (400, 401, 403):
+                    break  # credencial/configuração inválida: outros modelos não ajudariam
 
-            # Retorna o resultado de todas as ferramentas para o modelo prosseguir o raciocínio
-            contents.append(types.Content(role="user", parts=tool_response_parts))
+        return "Senhor, o roteador de IA não respondeu. Verifique LLM_ROUTER_API_KEY, LLM_ROUTER_BASE_URL e LLM_ROUTER_MODEL."
 
-        # Se atingiu o limite de turnos, gera uma resposta final
-        fallback_final, _ = await execute_model_request(current_model, contents)
-        return fallback_final.text or "Processamento concluído após múltiplas etapas de sistema, senhor."
-
-    except Exception as e:
-        error_str = str(e)
-        if "429" in error_str or "RESOURCE_EXHAUSTED" in error_str:
-            import re
-            retry_match = re.search(r"retryDelay':\s*'(\d+)s'", error_str) or re.search(r"retry in (\d+)", error_str) or re.search(r"(\d+)s", error_str)
-            seconds = int(retry_match.group(1)) if retry_match else 30
-            if seconds > 300:
-                seconds = 45
-            return f"Meus núcleos de processamento neural atingiram a capacidade máxima temporária, senhor. Peço que aguarde aproximadamente {seconds} segundos enquanto resfrio meus capacitores e recalibro os circuitos antes de processarmos seu próximo comando."
-        return f"Perdoe-me, senhor, ocorreu uma oscilação inesperada nos meus sistemas internos: {error_str}"
+    except LLMProviderError as erro:
+        return f"Senhor, o roteador de IA falhou: {erro}"
+    except Exception as erro:
+        return f"Perdoe-me, senhor, ocorreu uma oscilação inesperada nos meus sistemas internos: {erro}"
+    finally:
+        await provider.close()

@@ -99,7 +99,7 @@ def launch_chrome():
     global chrome_process
 
     with chrome_lock:
-        url = os.getenv("JARVIS_WEB_URL", "https://jarvis.samuel21tu.space/")
+        url = os.getenv("JARVIS_WEB_URL", "http://127.0.0.1:8081/")
         cmd = [
             "google-chrome-stable",
             f"--user-data-dir={CHROME_PROFILE}",
@@ -228,5 +228,21 @@ if __name__ == "__main__":
 
     node_thread = threading.Thread(target=run_node_thread, daemon=True)
     node_thread.start()
+
+    def run_local_hub():
+        """Hub standalone do PC: HUD e IA próprios, independentes do servidor."""
+        os.environ.setdefault("NODE_ROLE", "local")
+        os.environ.setdefault("JARVIS_PORT", "8081")
+        os.environ.setdefault("LLM_ROUTER_BASE_URL", "http://localhost:20128/v1")
+        os.environ.setdefault("LLM_ROUTER_ALLOWED_HOSTS", "localhost")
+        os.environ.setdefault("JARVIS_WEB_URL", "http://127.0.0.1:8081/")
+        try:
+            import uvicorn
+            uvicorn.run("src.hub.jarvis_hub:app", host="127.0.0.1", port=8081, log_level="warning")
+        except Exception as e:
+            print(f"[HUB LOCAL] Erro: {e}")
+
+    hub_thread = threading.Thread(target=run_local_hub, daemon=True)
+    hub_thread.start()
 
     setup_tray()

@@ -307,18 +307,65 @@ setInterval(updateMonitorMeters, 2000);
 // =============================================================================
 // 4. LOG DE ATIVIDADES E CHAT
 // =============================================================================
+/**
+ * Escapa HTML basico. Usado antes de interpolar texto em innerHTML.
+ */
+function escapeHtml(value) {
+    return String(value)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+/**
+ * Renderiza Markdown da IA sem permitir HTML cru nem URLs perigosas.
+ * marked nao sanitiza: escapar '<' antes do parse impede <img onerror>/<script>,
+ * e a varredura final remove href javascript:/data: e atributos de evento.
+ */
+function renderSafeMarkdown(text) {
+    const escaped = String(text)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+
+    const rawHtml = (typeof marked !== 'undefined')
+        ? marked.parse(escaped, { breaks: true, gfm: true })
+        : escaped.replace(/\n/g, '<br>');
+
+    const template = document.createElement('template');
+    template.innerHTML = rawHtml;
+
+    template.content.querySelectorAll('*').forEach((el) => {
+        Array.from(el.attributes).forEach((attr) => {
+            const name = attr.name.toLowerCase();
+            if (name.startsWith('on') || name === 'style' || name === 'srcdoc') {
+                el.removeAttribute(attr.name);
+            }
+        });
+
+        if (el.tagName === 'A') {
+            const href = el.getAttribute('href') || '';
+            if (/^\s*(javascript|data|vbscript):/i.test(href)) {
+                el.removeAttribute('href');
+            } else {
+                // Todo link gerado pela IA abre em nova aba, sem window.opener
+                el.setAttribute('target', '_blank');
+                el.setAttribute('rel', 'noopener noreferrer');
+            }
+        }
+    });
+
+    return template.innerHTML;
+}
+
 function appendLogLine(text, type = "sys") {
     const line = document.createElement('div');
     line.className = `log-line ${type}`;
 
-    if (type === "jarvis" && typeof marked !== "undefined") {
-        const parsed = marked.parse(text).replace(/<\/?p>/g, ' ');
-        line.innerHTML = parsed;
-        // Todo link gerado pela IA abre em nova aba, sem dar acesso ao window.opener
-        line.querySelectorAll('a[href]').forEach((anchor) => {
-            anchor.setAttribute('target', '_blank');
-            anchor.setAttribute('rel', 'noopener noreferrer');
-        });
+    if (type === "jarvis") {
+        line.innerHTML = renderSafeMarkdown(text).replace(/<\/?p>/g, ' ');
     } else {
         line.textContent = text;
     }
@@ -389,93 +436,6 @@ async function initUserAudioInput() {
     } catch (e) {
         console.warn("Aviso: Analisador Web Audio indisponível no dispositivo:", e);
         return false;
-    }
-}
-
-// =============================================================================
-// DETECTOR DE DUPLA PALMA (DOUBLE CLAP WAKE DETECTOR)
-// =============================================================================
-let lastClapTime = 0;
-let clapCount = 0;
-let clapResetTimer = null;
-let lastDetectedOnsetTime = 0;
-let micUnmutedAt = 0;
-
-function detectClapAudio(freqData) {
-    if (!freqData) return;
-    
-    // Evita que o eco da voz da própria IA seja interpretado como palmas (loop de retroalimentação)
-    if (isAISpeaking) return;
-
-    const now = performance.now();
-
-    // Proteção: ignora falsas palmas (estalos de mic/hardware) até 1.5 segundos após desmutar o microfone
-    if (now - micUnmutedAt < 1500) return;
-
-    // 1. Calcula pico e energia média no espectro de áudio do microfone
-    let sum = 0;
-    let peak = 0;
-    for (let i = 2; i < freqData.length; i++) {
-        const val = freqData[i];
-        sum += val;
-        if (val > peak) peak = val;
-    }
-    const avgVal = (sum / (freqData.length - 2)) / 255;
-    const peakVal = peak / 255;
-
-    // Detecta impacto sonoro agudo e rápido característico de palma (pico > 0.38, média > 0.12)
-    const isClapPeak = (peakVal > 0.38 && avgVal > 0.12);
-
-    if (isClapPeak) {
-        // Anti-repetição: exige 140ms de intervalo mínimo para não contar o mesmo ruído mais de 1 vez
-        if (now - lastDetectedOnsetTime > 140) {
-            lastDetectedOnsetTime = now;
-            clapCount++;
-            console.log(`[JARVIS CLAP] Palma ${clapCount} detectada! (peak: ${peakVal.toFixed(2)}, avg: ${avgVal.toFixed(2)})`);
-
-            if (clapCount === 1) {
-                lastClapTime = now;
-                clearTimeout(clapResetTimer);
-                // Se a segunda palma não for dada em 850ms, reseta a contagem
-                clapResetTimer = setTimeout(() => {
-                    clapCount = 0;
-                    lastClapTime = 0;
-                }, 850);
-            } else if (clapCount >= 2) {
-                const interval = now - lastClapTime;
-                // Janela ideal entre a 1ª e 2ª palma (140ms a 850ms)
-                if (interval >= 140 && interval <= 850) {
-                    console.log(`[JARVIS CLAP] 👏 👏 DUPLA PALMA DETECTADA! (Intervalo: ${Math.round(interval)}ms)`);
-                    clapCount = 0;
-                    lastClapTime = 0;
-                    clearTimeout(clapResetTimer);
-                    triggerDoubleClapWakeUp();
-                } else {
-                    clapCount = 1;
-                    lastClapTime = now;
-                }
-            }
-        }
-    }
-}
-
-function triggerDoubleClapWakeUp() {
-    console.log("[JARVIS WAKE] Reativando o JARVIS por comando de dupla palma!");
-    appendLogLine("SYS: 👏 👏 Dupla Palma Detectada! Reativando JARVIS...", "success");
-
-    // 1. Desativa modo descanso / standby
-    isJarvisResting = false;
-    userIntendedMicState = true;
-    updateMicUI(true);
-    setCoreState("listening");
-
-    if (speechRecognizer) {
-        try { speechRecognizer.abort(); } catch(e) {}
-    }
-
-    // 2. Emite confirmação vocal para o usuário
-    if (!isAISpeaking) {
-        speakAIResponse("Sistemas reativados por palmas, senhor. Às suas ordens.", null);
     }
 }
 
@@ -1004,8 +964,6 @@ function dispatchUserVoiceCommand(text) {
         cmdInput.value = "";
         speakAIResponse("Às suas ordens, senhor.", null);
         return;
-
-        textToProcess = commandText;
     } else {
         // Se já está no Modo de Atenção Total, remove o prefixo da palavra de ordem se presente
         const { hasWakeWord, commandText } = extractWakeWordCommand(cleanText);
@@ -1090,7 +1048,6 @@ function handleMicToggle(e) {
         appendLogLine("SYS: Microfone silenciado pelo usuário.", "sys");
     } else {
         userIntendedMicState = true;
-        micUnmutedAt = performance.now(); // Grava o tempo para ignorar estalos do microfone
         isJarvisResting = false; // Reativa o JARVIS no clique manual do microfone
         consecutiveSilenceErrors = 0;
         recognitionStartFailures = 0;
@@ -1289,6 +1246,11 @@ let speakActionId = 0;
  * Caso contrário, executa fallback transparente para a síntese WebSpeech do navegador.
  */
 function speakAIResponse(fullText, audioData) {
+    // O servidor pode enviar content/audio_data em formatos inesperados; nunca
+    // deixar isso travar a FSM com isAISpeaking = true.
+    const textToSpeak = typeof fullText === 'string' ? fullText : String(fullText ?? '');
+    const hasServerAudio = typeof audioData === 'string' && audioData.trim() !== '';
+
     speakActionId++;
     const currentSpeakId = speakActionId;
 
@@ -1309,12 +1271,41 @@ function speakAIResponse(fullText, audioData) {
     setCoreState("speaking");
     appendLogLine("SYS: JARVIS transmitindo resposta vocal...", "sys");
 
-    // Usa o áudio de alta qualidade do backend se existir, se não houver fallback
-    if (audioData && audioData.trim() !== "") {
-        playAudioBase64WebAudio(audioData, currentSpeakId);
-    } else {
-        fallbackToWebSpeech(fullText);
+    if (!hasServerAudio) {
+        fallbackToWebSpeech(textToSpeak);
+        return;
     }
+
+    // Watchdog e resolução da promise podem ocorrer no mesmo tick: stop() no
+    // watchdog dispara onended -> resolve(). Apenas um dos dois finaliza a fala.
+    let speechFinalized = false;
+    const finalizeOnce = () => {
+        if (speechFinalized) return false;
+        speechFinalized = true;
+        clearTimeout(speakingWatchdogTimer);
+        return true;
+    };
+
+    speakingWatchdogTimer = setTimeout(() => {
+        if (currentSpeakId !== speakActionId || !isAISpeaking) return;
+        if (!finalizeOnce()) return;
+        console.warn("Watchdog: áudio do servidor não terminou; liberando microfone.");
+        stopAISpeechAudioOnly();
+        onAISpeechFinished();
+    }, Math.max(10000, textToSpeak.length * 120));
+
+    playAudioBase64WebAudio(audioData, currentSpeakId)
+        .then(() => {
+            if (currentSpeakId !== speakActionId) return;
+            if (!finalizeOnce()) return;
+            onAISpeechFinished();
+        })
+        .catch((err) => {
+            if (currentSpeakId !== speakActionId) return; // fala mais recente já tomou o lugar
+            if (!finalizeOnce()) return;
+            console.warn("Falha no áudio do servidor, usando síntese local:", err);
+            fallbackToWebSpeech(textToSpeak);
+        });
 }
 
 function fallbackToWebSpeech(fullText) {
@@ -1349,7 +1340,9 @@ function speakNextSentence(sessionId) {
     }
     
     clearTimeout(speakingWatchdogTimer);
-    clearTimeout(speakNextSentenceTimer);    if (!isAISpeaking || currentSpeechIndex >= currentSpeechQueue.length) {
+    clearTimeout(speakNextSentenceTimer);
+
+    if (!isAISpeaking || currentSpeechIndex >= currentSpeechQueue.length) {
         onAISpeechFinished();
         return;
     }
@@ -1374,8 +1367,12 @@ function speakNextSentence(sessionId) {
     const allVoices = (synthVoices && synthVoices.length > 0) ? synthVoices : (window.speechSynthesis ? window.speechSynthesis.getVoices() : []);
     const ptVoices = allVoices.filter(v => v.lang && (v.lang.toLowerCase().includes('pt') || v.lang.toLowerCase().includes('br')));
     
-    if (true || allVoices.length === 0) {
-        console.warn("Nenhuma voz local encontrada (modo headless?). Usando fallback Google Translate TTS.");
+    // Voz pt-BR local tem prioridade; Google TTS fica apenas como fallback
+    // (modo headless, WebView sem voices ou speechSynthesis indisponível).
+    const canUseLocalVoice = !!utterance && !!window.speechSynthesis && ptVoices.length > 0;
+
+    if (!canUseLocalVoice) {
+        console.warn("Nenhuma voz pt-BR local disponível; usando fallback Google Translate TTS.");
         const fallbackUrl = `https://translate.google.com/translate_tts?ie=UTF-8&q=${encodeURIComponent(sentenceText)}&tl=pt-BR&client=tw-ob`;
         
         let sentenceFinished = false;
@@ -1427,13 +1424,11 @@ function speakNextSentence(sessionId) {
     }
 
     if (utterance) {
-        if (ptVoices.length > 0) {
-            const googleVoice = ptVoices.find(v => v.name.includes('Google'));
-            const preferred = googleVoice || ptVoices.find(v => v.name.includes('Luciana') || v.name.includes('Daniel') || v.name.includes('Francisca')) || ptVoices[0];
-            utterance.voice = preferred;
-        } else if (allVoices.length > 0) {
-            utterance.voice = allVoices[0];
-        }
+        const googleVoice = ptVoices.find(v => v.name.includes('Google'));
+        const preferred = googleVoice
+            || ptVoices.find(v => /Luciana|Daniel|Francisca/i.test(v.name))
+            || ptVoices[0];
+        utterance.voice = preferred;
 
         let sentenceFinished = false;
 
@@ -1566,7 +1561,7 @@ function sendUserCommand() {
 }
 
 sendBtn.addEventListener('click', sendUserCommand);
-cmdInput.addEventListener('keypress', (e) => {
+cmdInput.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') sendUserCommand();
 });
 
@@ -1574,9 +1569,15 @@ cmdInput.addEventListener('keypress', (e) => {
 function triggerInterrupt() {
     cmdInput.value = '';
     speechBuffer = '';
+
+    // Invalida a fala corrente ANTES de parar o áudio. O .then() de
+    // playAudioBase64WebAudio dispara no onended do stop() e compara
+    // currentSpeakId com speakActionId; com o id trocado ele não religa o mic.
+    speakActionId++;
+
     clearTimeout(restartRecognitionTimer);
     clearTimeout(speakingWatchdogTimer);
-    
+    clearTimeout(speakNextSentenceTimer);
     clearTimeout(speechCooldownTimer);
     clearTimeout(silenceDispatchTimer);
     clearTimeout(commandWatchdogTimer);
@@ -1584,9 +1585,12 @@ function triggerInterrupt() {
     if ('speechSynthesis' in window) {
         window.speechSynthesis.cancel();
     }
-    isAISpeaking = false;
+
+    // Para source WebAudio e <audio> de fallback, incrementa
+    // speechQueueSessionId e zera isAISpeaking/aiVoiceLevel.
+    stopAISpeechAudioOnly();
+
     isProcessingCommand = false;
-    aiVoiceLevel = 0.0;
     userVoiceLevel = 0.0;
 
     userIntendedMicState = false;
@@ -1711,7 +1715,8 @@ function updateFileStatusUI() {
         fileStatusLabel.textContent = "Nenhum arquivo recarregado - arraste, clique ou cole (Ctrl+V) imagens";
     } else {
         const names = pendingAttachments.map(a => a.name).join(", ");
-        fileStatusLabel.innerHTML = `<span style="color: var(--cyan-neon); font-weight: bold;">Anexado (${pendingAttachments.length}): ${names}</span> <button id="btn-clear-attachments" style="background:rgba(255,0,85,0.2);border:1px solid #ff0055;color:#ff0055;border-radius:3px;cursor:pointer;font-size:0.6rem;padding:2px 6px;margin-left:6px;">× Remover</button>`;
+        const safeNames = escapeHtml(names);
+        fileStatusLabel.innerHTML = `<span style="color: var(--cyan-neon); font-weight: bold;">Anexado (${pendingAttachments.length}): ${safeNames}</span> <button id="btn-clear-attachments" style="background:rgba(255,0,85,0.2);border:1px solid #ff0055;color:#ff0055;border-radius:3px;cursor:pointer;font-size:0.6rem;padding:2px 6px;margin-left:6px;">× Remover</button>`;
         const btnClear = document.getElementById('btn-clear-attachments');
         if (btnClear) {
             btnClear.onclick = (e) => {
@@ -1891,9 +1896,6 @@ function renderHoloCore() {
     // 1. CAPTURA E SUAVIZAÇÃO DOS NÍVEIS DE VOZ (USUÁRIO E IA)
     if (isMicActive && audioAnalyser && audioFreqData) {
         audioAnalyser.getByteFrequencyData(audioFreqData);
-
-        // Processa detecção contínua de dupla palma (funciona mesmo em standby para permitir o despertar)
-        detectClapAudio(audioFreqData);
 
         if (isJarvisResting || currentCoreState === "standby") {
             // Em Standby, o Orb NÃO reage a ruídos ou vozes (comporta-se como microfone desligado)

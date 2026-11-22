@@ -3,17 +3,35 @@
 import asyncio
 import base64
 import inspect
+import ipaddress
 import json
 import logging
+import re
 from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import urlparse
 
 import aiohttp
 
-# Configuração de segurança
-ALLOWED_OPENROUTER_HOST = "openrouter.ai"
 logger = logging.getLogger(__name__)
+
+
+# Fragmentos que parecem segredos em corpos de erro: headers Bearer/sk-* e chaves/tokens.
+_PATTERN_SEGRETO = re.compile(
+    r"(?i)"
+    r"bearer\s+[\w\-\.~+/=]+"
+    r"|sk-[A-Za-z0-9\-_]{8,}"
+    r"|(?:api[_-]?key|x[_-]?api[_-]?key|access[_-]?token|token|secret|password|authorization)"
+    r"['\"]?\s*[:=]\s*['\"]?[\w\-\.~+/=]{4,}"
+)
+
+
+def _redigir_segredos(texto: str) -> str:
+    """Redige fragmentos que parecem segredos de uma string antes de logar."""
+    if not texto:
+        return texto
+    return _PATTERN_SEGRETO.sub("[SEGREDO_REMOVIDO]", texto)
+
 
 @dataclass
 class ToolCall:
@@ -59,14 +77,14 @@ def _data_url(data: str, mime_type: str) -> str:
     base64.b64decode(valor, validate=True)
     return f"data:{mime_type};base64,{valor}"
 
-def mensagens_openrouter(history: list[dict[str, Any]], system_prompt: str, prompt: str,
-                         attachments: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
-    """Traduz o histórico do JARVIS para o formato Chat Completions (OpenRouter/OpenAI)."""
+def mensagens_router(history: list[dict[str, Any]], system_prompt: str, prompt: str,
+                     attachments: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
+    """Traduz o histórico do JARVIS para o formato Chat Completions usado pelo roteador."""
     mensagens: list[dict[str, Any]] = [{"role": "system", "content": system_prompt}]
 
     for item in history:
         papel = item.get("role", "user")
-        # Normaliza papéis: Gemini 'model' -> OpenAI 'assistant'
+        # Normaliza papéis legados: 'model' -> 'assistant'
         if papel == "model":
             papel = "assistant"
         elif papel not in {"user", "assistant", "system", "tool"}:
@@ -92,21 +110,54 @@ def mensagens_openrouter(history: list[dict[str, Any]], system_prompt: str, prom
     mensagens.append({"role": "user", "content": partes})
     return mensagens
 
-class OpenRouterProvider:
-    """Cliente assíncrono para a API do OpenRouter."""
+
+# Alias mantido para importações antigas.
+mensagens_openrouter = mensagens_router
+
+
+def _eh_loopback(url: str) -> bool:
+    """True para gateways locais (OmniRoute roda em localhost por padrão)."""
+    host = (urlparse(url or "").hostname or "").lower()
+    return host in {"localhost", "127.0.0.1", "::1"}
+
+
+def _validar_base_url(base_url: str, allowed_hosts: str = "") -> str:
+    """Valida a URL do roteador: HTTPS remoto ou HTTP somente em loopback (SSRF)."""
+    parsed = urlparse(base_url or "")
+    host = (parsed.hostname or "").lower()
+    if not host:
+        raise LLMProviderError("LLM_ROUTER_BASE_URL inválida (ex.: http://localhost:20128/v1)")
+
+    loopback = _eh_loopback(base_url)
+    if parsed.scheme == "http" and not loopback:
+        raise LLMProviderError("LLM_ROUTER_BASE_URL HTTP só é permitida em localhost/127.0.0.1")
+    if parsed.scheme not in ("http", "https"):
+        raise LLMProviderError("LLM_ROUTER_BASE_URL deve usar http (loopback) ou https")
+
+    if not loopback:
+        try:
+            if ipaddress.ip_address(host).is_private:
+                raise LLMProviderError("LLM_ROUTER_BASE_URL não pode apontar para IP privado")
+        except ValueError:
+            pass  # hostname público normal
+
+    permitidos = [h.strip().lower() for h in (allowed_hosts or "").split(",") if h.strip()]
+    if permitidos and host not in permitidos:
+        raise LLMProviderError(f"Host '{host}' não está em LLM_ROUTER_ALLOWED_HOSTS")
+
+    return base_url.rstrip("/")
+
+
+class RouterProvider:
+    """Cliente assíncrono para roteadores de IA compatíveis com Chat Completions (OmniRoute)."""
 
     def __init__(self, api_key: str, base_url: str, timeout: float = 45.0,
-                 http_referer: str = "", x_title: str = "JARVIS"):
-        if not api_key:
-            raise LLMProviderError("OPENROUTER_API_KEY não configurada")
-
-        # Validação estrita de SSRF: apenas openrouter.ai via HTTPS
-        parsed = urlparse(base_url)
-        if parsed.scheme != "https" or parsed.hostname != ALLOWED_OPENROUTER_HOST:
-            raise LLMProviderError(f"OPENROUTER_BASE_URL deve ser https://{ALLOWED_OPENROUTER_HOST}/api/v1")
-
-        self.api_key = api_key
-        self.base_url = base_url.rstrip("/")
+                 http_referer: str = "", x_title: str = "JARVIS", allowed_hosts: str = ""):
+        self.base_url = _validar_base_url(base_url, allowed_hosts)
+        # Gateways locais (OmniRoute) normalmente não exigem chave; remotos, sim.
+        if not api_key and not _eh_loopback(self.base_url):
+            raise LLMProviderError("LLM_ROUTER_API_KEY não configurada")
+        self.api_key = api_key or ""
         self.timeout_seconds = timeout
         self.http_referer = http_referer
         self.x_title = x_title
@@ -116,10 +167,9 @@ class OpenRouterProvider:
         """Sessão preguiçosa (lazy) reutilizável."""
         if self._session is None or self._session.closed:
             timeout = aiohttp.ClientTimeout(total=self.timeout_seconds)
-            headers = {
-                "Authorization": f"Bearer {self.api_key}",
-                "Content-Type": "application/json"
-            }
+            headers = {"Content-Type": "application/json"}
+            if self.api_key:
+                headers["Authorization"] = f"Bearer {self.api_key}"
             if self.http_referer:
                 headers["HTTP-Referer"] = self.http_referer
             if self.x_title:
@@ -155,20 +205,20 @@ class OpenRouterProvider:
                     categoria = "requisição rejeitada" if resp.status < 500 else "serviço indisponível"
                     # Sanitização de erro para não vazar payload ou tokens no log se o status vier com corpo sensível
                     corpo_erro = await resp.text()
-                    logger.error(f"Erro OpenRouter ({resp.status}): {corpo_erro[:200]}...")
+                    logger.error(f"Erro do roteador de IA ({resp.status}): {_redigir_segredos(corpo_erro[:200])}...")
                     raise LLMProviderError(
-                        f"OpenRouter: {categoria} (HTTP {resp.status})",
+                        f"Roteador de IA: {categoria} (HTTP {resp.status})",
                         resp.status,
                         resp.status == 429 or resp.status >= 500
                     )
 
                 dados = await resp.json()
         except asyncio.TimeoutError as erro:
-            raise LLMProviderError("OpenRouter: timeout de conexão", retryable=True) from erro
+            raise LLMProviderError("Roteador de IA: timeout de conexão", retryable=True) from erro
         except aiohttp.ClientError as erro:
-            raise LLMProviderError("OpenRouter: falha de conexão", retryable=True) from erro
+            raise LLMProviderError("Roteador de IA: falha de conexão", retryable=True) from erro
         except Exception as erro:
-            raise LLMProviderError(f"OpenRouter: erro inesperado: {str(erro)}") from erro
+            raise LLMProviderError(f"Roteador de IA: erro inesperado: {str(erro)}") from erro
 
         # Parsing da resposta
         escolha = (dados.get("choices") or [{}])[0]
@@ -202,6 +252,10 @@ class OpenRouterProvider:
         """Fecha a sessão HTTP."""
         if self._session and not self._session.closed:
             await self._session.close()
+
+
+# Alias mantido para importações antigas.
+OpenRouterProvider = RouterProvider
 
 
 class OllamaProvider:

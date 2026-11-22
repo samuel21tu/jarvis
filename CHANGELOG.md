@@ -5,6 +5,15 @@ Todas as alterações notáveis neste projeto serão documentadas neste arquivo.
 O formato baseia-se em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/),
 e este projeto adere ao [Versionamento Semântico](https://semver.org/lang/pt-BR/).
 
+## [Não Publicado] - 2026-11-21
+
+### Modificado
+- **Roteador de IA como provedor padrão:** respostas e resumo de memória passam a usar o OmniRoute local (`http://localhost:20128/v1`) por `LLM_ROUTER_BASE_URL` / `LLM_ROUTER_API_KEY` / `LLM_ROUTER_MODEL` (`auto/chat`, reserva `grok-cli/grok-4.7-low`). Gemini foi removido do caminho de inferência, sem fallback.
+- **Ativação por palma removida:** detectores de dupla palma e o despertar associado foram retirados do HUD mobile (`src/mobile/app.js`); o microfone continua controlado por toque/voz.
+
+### Segurança
+- Validação da URL do roteador: HTTPS obrigatório, bloqueio de localhost/IP privado (SSRF) e allowlist opcional de hosts via `LLM_ROUTER_ALLOWED_HOSTS`.
+
 ## [Não Publicado] - 2026-10-12
 
 ### Segurança
@@ -26,6 +35,8 @@ e este projeto adere ao [Versionamento Semântico](https://semver.org/lang/pt-BR
 - Guard-rail no Hub FastAPI (`jarvis_hub.py`) descartando requisições fantasmas com buffers vazios de fala.
 
 ### Corrigido
+- Orbe preso pulsando e microfone que não reconhecia voz após a primeira resposta: `speakAIResponse()` não chamava `onAISpeechFinished()` quando o áudio enviado pelo servidor terminava, deixando `isAISpeaking` permanentemente `true`. Agora a conclusão do áudio (ou watchdog/falha no decode) limpa a flag e retoma a escuta; adicionado fallback para síntese local se o decode falhar.
+- Removido resquício da funcionalidade de palma em `handleMicToggle` (`micUnmutedAt`).
 - Loop de silêncio e estado travado em `MUTED` em dispositivos móveis.
 - Corrida assíncrona que causava vozes sobrepostas simultâneas do sintetizador TTS.
 

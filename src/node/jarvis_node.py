@@ -2,6 +2,7 @@ import os
 import sys
 import json
 import time
+import uuid
 import asyncio
 import platform
 import subprocess
@@ -14,6 +15,35 @@ from websockets.exceptions import ConnectionClosed
 NEXUS_URL = os.getenv("NEXUS_URL", "ws://192.168.1.92:8080")
 NEXUS_API_KEY = os.getenv("NEXUS_API_KEY", "default_secure_key_change_me_in_prod")
 NODE_ID = os.getenv("NODE_ID", f"{platform.node().lower()}_{platform.system().lower()}")
+
+# Link par-a-par com o servidor: permite que o PC envie comandos/status ao par.
+_peer_ws = None
+_peer_pending: dict[str, asyncio.Future] = {}
+
+# Timeout unificado de execução entre PC e Servidor (via WebSocket)
+EXECUTION_TIMEOUT = 50.0
+
+
+async def request_peer(action: str, **kwargs) -> str:
+    """Envia uma ação ao par remoto e aguarda o resultado correlacionado por req_id."""
+    if _peer_ws is None:
+        raise RuntimeError("Par remoto offline")
+    req_id = str(uuid.uuid4())
+    future = asyncio.get_running_loop().create_future()
+    _peer_pending[req_id] = future
+    try:
+        await _peer_ws.send(json.dumps({"action": action, "req_id": req_id, **kwargs}))
+        return await asyncio.wait_for(future, timeout=EXECUTION_TIMEOUT)
+    finally:
+        _peer_pending.pop(req_id, None)
+
+
+async def peer_execute_command(cmd: str) -> str:
+    return await request_peer("execute_command", cmd=cmd)
+
+
+async def peer_get_system_status() -> str:
+    return await request_peer("get_system_status")
 
 # Cores para o terminal do Nó (Ciano e Âmbar)
 CYAN = '\033[0;36m'
@@ -91,10 +121,54 @@ def get_system_status() -> str:
 
 
 import re
+import shlex
+
+# Segundos alvos intocáveis por `rm` recursivo/forçado (raiz, /etc, /home, ~, $HOME, /var, /usr...)
+SENSITIVE_RM_TARGETS = {
+    "/", "/etc", "/home", "/var", "/usr", "/bin", "/sbin", "/lib", "/lib64",
+    "/boot", "/root", "/opt", "/srv", "/mnt", "/media", "~", "$HOME",
+    "*", "/*", "..", "../", "~/*", "$HOME/*",
+}
+SENSITIVE_RM_PREFIXES = (
+    "/etc/", "/home/", "/var/", "/usr/", "/bin/", "/sbin/", "/lib/", "/lib64/",
+    "/boot/", "/root/", "/opt/", "/srv/", "/mnt/", "/media/", "~/", "$HOME/",
+)
+
+
+def _is_sensitive_rm_target(target: str) -> bool:
+    """True se o alvo de um `rm` recursivo/forçado é sensível (/, /etc, /home, ~, $HOME, /var, /usr)."""
+    if not target or target.startswith("-"):
+        return False
+    t = target.strip()
+    if t in SENSITIVE_RM_TARGETS:
+        return True
+    norm = t.rstrip("/") if t != "/" else t
+    if norm in SENSITIVE_RM_TARGETS:
+        return True
+    return t.startswith(SENSITIVE_RM_PREFIXES) or norm.startswith(SENSITIVE_RM_PREFIXES)
+
+
+def _is_rm_dangerous(tokens: list) -> bool:
+    """Detecta `rm` recursivo/forçado contra alvos sensíveis, por token/alvo."""
+    for i, tok in enumerate(tokens):
+        if tok != "rm":
+            continue
+        recursive = False
+        j = i + 1
+        while j < len(tokens) and tokens[j].startswith("-") and tokens[j] not in ("-", "--"):
+            body = tokens[j].lstrip("-")
+            if body.startswith("recursive") or "r" in body or "R" in body:
+                recursive = True
+            j += 1
+        if not recursive:
+            continue
+        if any(_is_sensitive_rm_target(t) for t in tokens[j:]):
+            return True
+    return False
+
 
 # Padrões estritamente proibidos de execução automática pelo nó
 DANGEROUS_PATTERNS = [
-    r"\brm\s+(-[a-zA-Z]*[rfRF][a-zA-Z]*\s+)+(\*|/\*?|~/\*?|\$HOME/?|\.\./?)($|\s)",
     r"\bmkfs(\.[a-zA-Z0-9]+)?\b",
     r"\bdd\s+if=",
     r":\(\)\s*\{\s*:\s*\|\s*:\s*&\s*\}\s*;\s*:",  # Fork bomb
@@ -104,12 +178,22 @@ DANGEROUS_PATTERNS = [
     r"\bcat\s+.*\.ssh/id_[a-zA-Z0-9_-]+\b",
 ]
 
+
 def is_command_safe(cmd: str) -> tuple[bool, str]:
     """Valida se o comando não viola as diretrizes de segurança defensiva."""
     normalized = cmd.strip()
     for pattern in DANGEROUS_PATTERNS:
         if re.search(pattern, normalized, re.IGNORECASE):
             return False, f"Comando bloqueado por política de segurança estrita: padrão de risco detectado ({pattern})"
+    try:
+        tokens = shlex.split(normalized)
+    except ValueError:
+        tokens = normalized.split()
+    # Desdobra tokens aninhados (ex.: `bash -c "rm -rf /"`) e verifica `rm` recursivo/forçado.
+    flat = [sub for tok in tokens for sub in tok.split()]
+    if _is_rm_dangerous(flat):
+        return False, ("Comando bloqueado por política de segurança estrita: "
+                       "rm recursivo/forçado contra alvo sensível (/, /etc, /home, ~, $HOME, /var, /usr, /bin, /boot...)")
     return True, ""
 
 
@@ -138,7 +222,7 @@ def execute_command(cmd: str) -> str:
             executable=executable,
             capture_output=True,
             text=True,
-            timeout=50.0
+            timeout=EXECUTION_TIMEOUT
         )
 
         output = ""
@@ -156,7 +240,7 @@ def execute_command(cmd: str) -> str:
 
     except subprocess.TimeoutExpired:
         print(f"{RED}[!] Timeout de execução para comando: {cmd}{NC}")
-        return "Error: Command execution timed out after 50 seconds."
+        return f"Error: Command execution timed out after {int(EXECUTION_TIMEOUT)} seconds."
     except Exception as e:
         print(f"{RED}[!] Erro ao executar comando: {e}{NC}")
         return f"Error executing command: {e}"
@@ -164,17 +248,31 @@ def execute_command(cmd: str) -> str:
 
 async def handle_server_message(ws, message: str):
     """Processa mensagens e comandos enviados do Servidor (Hub) para o PC (Nó)."""
+    global _peer_ws
     try:
         payload = json.loads(message)
         action = payload.get("action")
         req_id = payload.get("req_id")
+
+        # Resposta a uma solicitação que este PC fez ao par remoto
+        if req_id in _peer_pending:
+            future = _peer_pending[req_id]
+            if not future.done():
+                future.set_result(payload.get("result", "Sem resultado."))
+            return
+
+        # Chegou mensagem com req_id mas sem action reconhecida (resposta esperada ou
+        # mensagem de controle): não responde "Unknown action." — não há nada a executar.
+        if req_id and action not in ("execute_command", "get_system_status"):
+            return
 
         result_data = "Unknown action."
 
         # 1. Servidor mandou executar um comando no PC
         if action == "execute_command":
             cmd = payload.get("cmd", "")
-            result_data = execute_command(cmd)
+            # Executa em thread para não bloquear o loop de leitura do WebSocket
+            result_data = await asyncio.to_thread(execute_command, cmd)
 
         # 2. Servidor pediu status detalhado do PC
         elif action == "get_system_status":
@@ -241,6 +339,7 @@ async def terminal_interactive_input(ws):
 
 async def run_node():
     """Ciclo de vida principal do nó com reconexão automática e tarefas assíncronas."""
+    global _peer_ws
     uri = f"{NEXUS_URL}/ws/node/{NODE_ID}"
     headers = {"nexus-api-key": NEXUS_API_KEY}
 
@@ -254,6 +353,7 @@ async def run_node():
         try:
             async with websockets.connect(uri, additional_headers=headers) as ws:
                 print(f"{GREEN}[+] Conectado com sucesso ao Jarvis Hub! Comunicação bidirecional ativa.{NC}")
+                _peer_ws = ws
 
                 # Inicia tarefas concorrentes: telemetria contínua, leitura do terminal e escuta de ordens
                 telemetry_task = asyncio.create_task(telemetry_loop(ws))
@@ -263,6 +363,10 @@ async def run_node():
                     async for message in ws:
                         await handle_server_message(ws, message)
                 finally:
+                    _peer_ws = None
+                    for fut in list(_peer_pending.values()):
+                        if not fut.done():
+                            fut.set_result("Error: par remoto desconectado.")
                     telemetry_task.cancel()
                     cli_task.cancel()
 

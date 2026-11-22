@@ -1,24 +1,51 @@
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
     nexus_api_key: str = ""
-    gemini_api_key: str = ""
-    openrouter_api_key: str = ""
-    openrouter_base_url: str = "https://openrouter.ai/api/v1"
-    openrouter_model: str = ""
-    llm_provider: str = "gemini"
+    # Roteador de provedores de IA (ominiroute ou qualquer gateway compatível com Chat Completions).
+    # Os aliases OPENROUTER_* preservam configurações antigas de deploy.
+    llm_router_api_key: str = Field(
+        default="",
+        validation_alias=AliasChoices("LLM_ROUTER_API_KEY", "OPENROUTER_API_KEY"),
+    )
+    llm_router_base_url: str = Field(
+        default="",
+        validation_alias=AliasChoices("LLM_ROUTER_BASE_URL", "OPENROUTER_BASE_URL"),
+    )
+    llm_router_model: str = Field(
+        default="",
+        validation_alias=AliasChoices("LLM_ROUTER_MODEL", "OPENROUTER_MODEL"),
+    )
+    llm_router_fallback_models: str = Field(
+        default="",
+        validation_alias=AliasChoices("LLM_ROUTER_FALLBACK_MODELS", "OPENROUTER_FALLBACK_MODELS"),
+    )
+    llm_router_http_referer: str = Field(
+        default="",
+        validation_alias=AliasChoices("LLM_ROUTER_HTTP_REFERER", "OPENROUTER_HTTP_REFERER"),
+    )
+    llm_router_x_title: str = Field(
+        default="JARVIS",
+        validation_alias=AliasChoices("LLM_ROUTER_X_TITLE", "OPENROUTER_X_TITLE"),
+    )
+    # Lista CSV opcional de hosts permitidos. Vazia = qualquer host público HTTPS.
+    llm_router_allowed_hosts: str = ""
+    llm_provider: str = "ominiroute"
+    # Porta do Hub local. Convenção: servidor usa 8080 (padrão); o PC usa 8081 via
+    # JARVIS_PORT (jarvis_tray.py faz setdefault em 8081). Não mudar sem alinhar o deploy.
+    jarvis_port: int = 8080
     llm_timeout_seconds: float = 45.0
     llm_max_attempts: int = 2
-    gemini_model: str = "gemini-flash-latest"
-    gemini_fallback_models: str = "gemini-3.5-flash,gemini-flash-lite-latest,gemini-3.5-flash-lite"
-    openrouter_fallback_models: str = ""
-    openrouter_http_referer: str = ""
-    openrouter_x_title: str = "JARVIS"
     elevenlabs_api_key: str = ""
     elevenlabs_voice_id: str = "onwK4e9ZLuTAKqWW03F9"
+    # Caminho do vault do Obsidian. O servidor deve definir OBSIDIAN_VAULT_PATH próprio
+    # (ex.: /data/obsidian_vault) para não herdar o caminho local do PC.
     obsidian_vault_path: str = "/home/samuel/Documentos/Programacao/jarvis/obsidian_vault"
-    # Banco de memória conversacional, separado do Obsidian (que guarda só conhecimento)
+    # Banco de memória conversacional, separado do Obsidian (que guarda só conhecimento).
+    # O default é o caminho do PC; o servidor deve definir MEMORY_DB_PATH próprio
+    # (ex.: /data/memory/jarvis_memory.db) para ter o próprio arquivo, sem compartilhar.
     memory_db_path: str = "/home/samuel/Documentos/Programacao/jarvis/data/memory/jarvis_memory.db"
     
     # Configurações do Provedor Ollama (IA Local)
@@ -34,13 +61,9 @@ class Settings(BaseSettings):
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
-    def modelos_gemini(self) -> list[str]:
-        """Retorna modelos Gemini configurados, sem itens vazios ou duplicados."""
-        return _lista_csv(self.gemini_model, self.gemini_fallback_models)
-
-    def modelos_openrouter(self) -> list[str]:
-        """Retorna o modelo OpenRouter e seus reservas na ordem declarada."""
-        return _lista_csv(self.openrouter_model, self.openrouter_fallback_models)
+    def modelos_llm_router(self) -> list[str]:
+        """Retorna o modelo do roteador e seus reservas na ordem declarada."""
+        return _lista_csv(self.llm_router_model, self.llm_router_fallback_models)
 
     def modelos_ollama(self) -> list[str]:
         """Retorna o modelo Ollama principal e seus reservas."""

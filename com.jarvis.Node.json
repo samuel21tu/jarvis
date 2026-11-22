@@ -25,7 +25,7 @@
                 ]
             },
             "build-commands": [
-                "pip3 install --prefix=/app pystray pillow websockets psutil pywebview"
+                "pip3 install --prefix=/app pystray pillow websockets psutil pywebview fastapi uvicorn pydantic pydantic-settings aiohttp edge-tts requests tenacity python-dotenv"
             ]
         },
         {
@@ -34,12 +34,17 @@
             "build-commands": [
                 "mkdir -p /app/bin",
                 "mkdir -p /app/src/node",
+                "mkdir -p /app/src/hub/core",
+                "mkdir -p /app/src/mobile",
                 "mkdir -p /app/share/applications",
                 "mkdir -p /app/share/icons/hicolor/512x512/apps",
                 "cp com.jarvis.Node.desktop /app/share/applications/com.jarvis.Node.desktop",
                 "cp com.jarvis.Node.png /app/share/icons/hicolor/512x512/apps/com.jarvis.Node.png",
                 "cp src/node/*.py /app/src/node/",
-                "cat << 'EOF' > /app/bin/start-jarvis\n#!/bin/sh\nexport PYTHONPATH=/app/src\npython3 /app/src/node/jarvis_tray.py\nEOF",
+                "cp src/hub/*.py /app/src/hub/",
+                "cp src/hub/core/*.py /app/src/hub/core/",
+                "cp src/mobile/* /app/src/mobile/",
+                "cat << 'EOF' > /app/bin/start-jarvis\n#!/bin/sh\nexport PYTHONPATH=/app/src\nexport NODE_ROLE=local\nexport JARVIS_PORT=8081\nexport LLM_ROUTER_BASE_URL=${LLM_ROUTER_BASE_URL:-http://localhost:20128/v1}\nexport LLM_ROUTER_ALLOWED_HOSTS=${LLM_ROUTER_ALLOWED_HOSTS:-localhost}\nexport JARVIS_WEB_URL=${JARVIS_WEB_URL:-http://127.0.0.1:8081/}\nexport NEXUS_URL=${NEXUS_URL:-ws://192.168.1.92:8080}\npython3 /app/src/node/jarvis_tray.py\nEOF",
                 "chmod +x /app/bin/start-jarvis"
             ],
             "sources": [

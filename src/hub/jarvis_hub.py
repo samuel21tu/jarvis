@@ -1,14 +1,17 @@
 import os
 import json
 import asyncio
+import platform
+import subprocess
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from src.hub.core.config import settings
 from src.hub.core.websocket import manager
 from src.hub.core.memory import memory
-from src.hub.core.llm import chat_with_nexus, pending_requests
+from src.hub.core.llm import chat_with_nexus, pending_requests, set_remote_server_dispatchers
 from src.hub.core.tts import generate_tts_audio_base64
+from src.node.jarvis_node import is_command_safe, EXECUTION_TIMEOUT
 
 app = FastAPI(title="Jarvis Nexus Hub")
 
@@ -20,6 +23,8 @@ ALLOWED_ORIGINS = [
     "http://localhost:8080",
     "http://127.0.0.1:8000",
     "http://127.0.0.1:8080",
+    "http://localhost:8081",
+    "http://127.0.0.1:8081",
 ]
 extra_origins = os.getenv("ALLOWED_ORIGINS", "")
 if extra_origins:
@@ -32,6 +37,15 @@ app.add_middleware(
     allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["*"],
 )
+
+
+@app.on_event("startup")
+async def _wire_peer_dispatchers():
+    """No PC (node_role=local), liga as ferramentas ao par remoto quando ele estiver online."""
+    if settings.node_role.strip().lower() == "local":
+        from src.node.jarvis_node import peer_execute_command, peer_get_system_status
+        set_remote_server_dispatchers(peer_execute_command, peer_get_system_status)
+        print("[PC] Modo local ativo: OmniRoute próprio, par remoto opcional via WebSocket.")
 
 
 @app.middleware("http")
@@ -75,11 +89,53 @@ async def websocket_node_endpoint(websocket: WebSocket, node_id: str):
                 future = pending_requests[payload["req_id"]]
                 if not future.done():
                     future.set_result(payload.get("result", "No result provided"))
+                pending_requests.pop(payload["req_id"], None)
 
             # 2. Telemetria de hardware periódica enviada pelo PC para o Servidor
             elif payload.get("action") == "telemetry":
                 metrics = payload.get("metrics", {})
                 await manager.broadcast_hardware_metrics(node_id, metrics)
+
+            # 2b. Comando/status enviado pelo PC para execução LOCAL no servidor
+            elif payload.get("action") in ("execute_command", "get_system_status"):
+                req_id = payload.get("req_id")
+                action = payload.get("action")
+                # Registra a requisição no store de correlação: entrada presente
+                # durante a execução e removida no sucesso (resposta enviada).
+                if req_id:
+                    pending_requests.setdefault(req_id, asyncio.get_running_loop().create_future())
+                try:
+                    if action == "get_system_status":
+                        import psutil
+                        result_data = (
+                            "Status do Servidor:\n"
+                            f"CPU: {psutil.cpu_percent(interval=None)}%\n"
+                            f"RAM: {psutil.virtual_memory().percent}%\n"
+                            f"Disco: {psutil.disk_usage('/').percent}%\n"
+                            f"OS: {platform.system()}"
+                        )
+                    else:
+                        cmd = payload.get("cmd", "")
+                        safe, reason = is_command_safe(cmd)
+                        if not safe:
+                            result_data = f"Security Error: {reason}"
+                        else:
+                            proc = await asyncio.to_thread(
+                                subprocess.run, cmd, shell=True,
+                                capture_output=True, text=True, timeout=EXECUTION_TIMEOUT
+                            )
+                            out = ""
+                            if proc.stdout:
+                                out += f"STDOUT:\n{proc.stdout}\n"
+                            if proc.stderr:
+                                out += f"STDERR:\n{proc.stderr}\n"
+                            result_data = out or f"Comando encerrado com código {proc.returncode}."
+                except Exception as exc:
+                    result_data = f"Erro ao executar no servidor: {exc}"
+
+                if req_id:
+                    await websocket.send_json({"req_id": req_id, "result": result_data})
+                    pending_requests.pop(req_id, None)
 
             # 3. Comando enviado do PC (terminal ou script local) para o Servidor processar
             elif payload.get("action") == "node_prompt":
@@ -210,4 +266,4 @@ if os.path.exists(mobile_dir):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("src.hub.jarvis_hub:app", host="0.0.0.0", port=8080, reload=True)
+    uvicorn.run("src.hub.jarvis_hub:app", host="0.0.0.0", port=settings.jarvis_port, reload=False)
