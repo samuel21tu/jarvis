@@ -44,7 +44,7 @@
                 "cp src/hub/*.py /app/src/hub/",
                 "cp src/hub/core/*.py /app/src/hub/core/",
                 "cp src/mobile/* /app/src/mobile/",
-                "cat << 'EOF' > /app/bin/start-jarvis\n#!/bin/sh\nexport PYTHONPATH=/app/src\nexport NODE_ROLE=local\nexport JARVIS_PORT=8081\nexport LLM_ROUTER_BASE_URL=${LLM_ROUTER_BASE_URL:-http://localhost:20128/v1}\nexport LLM_ROUTER_ALLOWED_HOSTS=${LLM_ROUTER_ALLOWED_HOSTS:-localhost}\nexport JARVIS_WEB_URL=${JARVIS_WEB_URL:-http://127.0.0.1:8081/}\nexport NEXUS_URL=${NEXUS_URL:-ws://192.168.1.92:8080}\npython3 /app/src/node/jarvis_tray.py\nEOF",
+                "cat << 'EOF' > /app/bin/start-jarvis\n#!/bin/sh\nexport PYTHONPATH=/app\nexport NODE_ROLE=local\nexport JARVIS_PORT=8081\nexport LLM_ROUTER_BASE_URL=${LLM_ROUTER_BASE_URL:-http://localhost:20128/v1}\nexport LLM_ROUTER_ALLOWED_HOSTS=${LLM_ROUTER_ALLOWED_HOSTS:-localhost}\nexport LLM_ROUTER_MODEL=${LLM_ROUTER_MODEL:-auto/chat}\nexport LLM_ROUTER_FALLBACK_MODELS=${LLM_ROUTER_FALLBACK_MODELS:-}\nexport JARVIS_WEB_URL=${JARVIS_WEB_URL:-http://127.0.0.1:8081/}\nexport NEXUS_URL=${NEXUS_URL:-ws://192.168.1.92:8080}\npython3 /app/src/node/jarvis_tray.py\nEOF",
                 "chmod +x /app/bin/start-jarvis"
             ],
             "sources": [

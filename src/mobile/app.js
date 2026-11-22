@@ -29,6 +29,15 @@ let currentCoreState = "muted"; // 'muted' | 'active' | 'listening' | 'speaking'
 let recognitionStartFailures = 0;
 const MAX_START_FAILURES = 3;
 
+// Recuperação automática do microfone após reinícios rápidos (principalmente PC/Chrome).
+// Backoff limitado: não deixa o HUD preso num estado "pausado" para sempre.
+const MIC_RECOVERY_DELAYS_MS = [5000, 15000, 30000];
+
+// No PC o SpeechRecognition tem prioridade exclusiva do dispositivo. O analisador
+// WebAudio só é ligado se habilitado explicitamente via ?analyser na URL.
+const ENABLE_PC_WEBAUDIO_ANALYSER = new URLSearchParams(window.location.search).has('analyser');
+const MAX_AUDIO_ANALYZER_ATTEMPTS = 3;
+
 // Timers de controle e prevenção de loop
 let restartRecognitionTimer = null;
 let speakingWatchdogTimer = null;
@@ -42,6 +51,10 @@ let wsReconnectTimer = null;
 let wsReconnectAttempts = 0;
 let lastRecognitionStartTime = 0;
 let rapidRestartCount = 0;
+let micRecoveryTimer = null;
+let micRecoveryAttempt = 0;
+let audioAnalyzerInitTimer = null;
+let audioAnalyzerInitAttempts = 0;
 
 // Níveis de áudio instantâneos (0.0 a 1.0)
 let userVoiceLevel = 0.0;
@@ -55,6 +68,7 @@ let audioCtx = null;
 let audioAnalyser = null;
 let audioFreqData = null;
 let mediaStreamSource = null;
+let audioInputStream = null;
 let isAudioInputInitialized = false;
 
 // Elementos da DOM
@@ -412,7 +426,16 @@ async function initUserAudioInput() {
             return false;
         }
 
+        // Libera qualquer stream órfão antes de abrir o dispositivo novamente.
+        if (audioInputStream) {
+            audioInputStream.getTracks().forEach((track) => {
+                try { track.stop(); } catch (e) {}
+            });
+            audioInputStream = null;
+        }
+
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        audioInputStream = stream;
         const AudioContextClass = window.AudioContext || window.webkitAudioContext;
         if (!audioCtx && AudioContextClass) {
             audioCtx = new AudioContextClass();
@@ -437,6 +460,107 @@ async function initUserAudioInput() {
         console.warn("Aviso: Analisador Web Audio indisponível no dispositivo:", e);
         return false;
     }
+}
+
+/**
+ * Libera o stream do analisador WebAudio. Importante no PC: um segundo consumidor
+ * do microfone pode causar 'audio-capture' no SpeechRecognition.
+ */
+function stopAudioAnalyzer() {
+    clearTimeout(audioAnalyzerInitTimer);
+    audioAnalyzerInitTimer = null;
+    audioAnalyzerInitAttempts = 0;
+
+    if (mediaStreamSource) {
+        try { mediaStreamSource.disconnect(); } catch (e) {}
+        mediaStreamSource = null;
+    }
+    if (audioInputStream) {
+        audioInputStream.getTracks().forEach((track) => {
+            try { track.stop(); } catch (e) {}
+        });
+        audioInputStream = null;
+    }
+
+    audioAnalyser = null;
+    audioFreqData = null;
+    isAudioInputInitialized = false;
+}
+
+/**
+ * Inicialização opcional do analisador no PC. Espera o SpeechRecognition ficar
+ * ocioso entre sessões; se o dispositivo continuar ocupado, desiste e mantém
+ * apenas o pulso visual sintético já implementado em renderHoloCore().
+ */
+function scheduleAudioAnalyzerInit() {
+    clearTimeout(audioAnalyzerInitTimer);
+    audioAnalyzerInitTimer = setTimeout(() => {
+        audioAnalyzerInitTimer = null;
+        if (!userIntendedMicState || isAISpeaking || isProcessingCommand) return;
+
+        if (isMicActive || isStartingRecognition) {
+            if (audioAnalyzerInitAttempts < MAX_AUDIO_ANALYZER_ATTEMPTS) {
+                audioAnalyzerInitAttempts++;
+                scheduleAudioAnalyzerInit();
+            } else {
+                console.warn("Analisador WebAudio ignorado: microfone ocupado pelo SpeechRecognition.");
+            }
+            return;
+        }
+
+        audioAnalyzerInitAttempts = 0;
+        initUserAudioInput().catch((err) => {
+            console.warn("[JARVIS DEBUG] Aviso no analisador de áudio:", err);
+        });
+    }, 1000);
+}
+
+/** Cancela qualquer recuperação pendente sem mexer na intenção do usuário. */
+function resetMicRecovery() {
+    if (micRecoveryTimer) clearTimeout(micRecoveryTimer);
+    micRecoveryTimer = null;
+    micRecoveryAttempt = 0;
+}
+
+/**
+ * Recuperação com backoff para o loop de reinícios rápidos.
+ * Mantém userIntendedMicState=true enquanto ainda há tentativas automáticas;
+ * só desiste (e libera o clique manual) após esgotar MIC_RECOVERY_DELAYS_MS.
+ */
+function scheduleMicRecovery() {
+    if (!userIntendedMicState) return;
+
+    if (micRecoveryTimer) clearTimeout(micRecoveryTimer);
+    clearTimeout(restartRecognitionTimer);
+    clearTimeout(silenceDispatchTimer);
+
+    const delay = MIC_RECOVERY_DELAYS_MS[Math.min(micRecoveryAttempt, MIC_RECOVERY_DELAYS_MS.length - 1)];
+    micRecoveryAttempt++;
+    rapidRestartCount = 0;
+
+    if (micRecoveryAttempt > MIC_RECOVERY_DELAYS_MS.length) {
+        resetMicRecovery();
+        userIntendedMicState = false;
+        stopAudioAnalyzer();
+        updateMicUI(false);
+        setCoreState("muted");
+        appendLogLine("SYS: Microfone pausado após várias tentativas automáticas. Clique no microfone para reativar.", "warn");
+        return;
+    }
+
+    updateMicUI('starting');
+    setCoreState("muted");
+    appendLogLine(`SYS: Microfone instável; tentativa automática ${micRecoveryAttempt}/${MIC_RECOVERY_DELAYS_MS.length} em ${delay / 1000}s.`, "warn");
+
+    micRecoveryTimer = setTimeout(() => {
+        micRecoveryTimer = null;
+        if (!userIntendedMicState || isAISpeaking || isProcessingCommand) {
+            resetMicRecovery();
+            return;
+        }
+        console.warn(`Reiniciando reconhecimento após backoff de ${delay}ms (tentativa ${micRecoveryAttempt}).`);
+        startRecognition();
+    }, delay);
 }
 
 /**
@@ -522,6 +646,12 @@ function createSpeechRecognizer() {
         recognizer.onstart = () => {
             isStartingRecognition = false;
             isMicActive = true;
+            // Uma sessão iniciada substitui a tentativa de backoff pendente;
+            // o contador só zera depois de uma sessão estável no onend.
+            if (micRecoveryTimer) {
+                clearTimeout(micRecoveryTimer);
+                micRecoveryTimer = null;
+            }
             recognitionStartFailures = 0;
             consecutiveSilenceErrors = 0;
             lastRecognitionStartTime = Date.now();
@@ -634,14 +764,19 @@ function createSpeechRecognizer() {
 
             // Permissão negada pelo usuário ou sistema (ou falha de autostart sem gesto prévio)
             if (err === 'not-allowed' || err === 'service-not-allowed') {
+                // Sem isso, onend via userIntendedMicState ainda true e agendava
+                // reinícios em loop enquanto o botão mostrava MUTED.
+                userIntendedMicState = false;
                 isMicActive = false;
                 consecutiveSilenceErrors = 0;
                 recognitionStartFailures = 0;
+                resetMicRecovery();
+                stopAudioAnalyzer();
                 clearTimeout(restartRecognitionTimer);
                 clearTimeout(silenceDispatchTimer);
                 updateMicUI(false);
                 setCoreState("muted");
-                appendLogLine("SYS: Permissão de microfone negada ou aguardando interação do usuário.", "warn");
+                appendLogLine("SYS: Permissão de microfone negada ou aguardando interação do usuário. Libere o acesso e clique no microfone.", "warn");
                 return;
             }
 
@@ -649,11 +784,13 @@ function createSpeechRecognizer() {
             if (err === 'audio-capture' || err === 'network') {
                 userIntendedMicState = false;
                 isMicActive = false;
+                resetMicRecovery();
+                stopAudioAnalyzer();
                 clearTimeout(restartRecognitionTimer);
                 clearTimeout(silenceDispatchTimer);
                 updateMicUI(false);
                 setCoreState("muted");
-                appendLogLine(`SYS: Falha no subsistema de áudio (${err}).`, "warn");
+                appendLogLine(`SYS: Falha no subsistema de áudio (${err}). Clique no microfone para tentar novamente.`, "warn");
                 return;
             }
         };
@@ -667,18 +804,16 @@ function createSpeechRecognizer() {
             if (sessionDuration < 1200) {
                 rapidRestartCount++;
             } else {
+                // Sessão estável: encerra o ciclo de backoff e volta ao regime normal.
+                if (sessionDuration >= 3000) {
+                    resetMicRecovery();
+                }
                 rapidRestartCount = 0;
             }
 
             if (rapidRestartCount >= 3) {
-                console.warn("Muitos reinícios rápidos do microfone detectados. Pausando auto-restart.");
-                userIntendedMicState = false;
-                rapidRestartCount = 0;
-                clearTimeout(silenceDispatchTimer);
-                clearTimeout(restartRecognitionTimer);
-                updateMicUI(false);
-                setCoreState("muted");
-                appendLogLine("SYS: Microfone pausado devido a instabilidade do navegador. Clique no microfone para reativar.", "warn");
+                console.warn("Muitos reinícios rápidos do microfone detectados. Aplicando backoff com recuperação automática.");
+                scheduleMicRecovery();
                 return;
             }
 
@@ -730,6 +865,7 @@ function startRecognition() {
 
         if (!speechRecognizer) {
             userIntendedMicState = false;
+            resetMicRecovery();
             isStartingRecognition = false;
             isMicActive = false;
             recognitionStartFailures = 0;
@@ -766,6 +902,7 @@ function startRecognition() {
         if (recognitionStartFailures >= MAX_START_FAILURES) {
             console.error("Limite de falhas de inicialização do reconhecimento atingido. Recuperando FSM.");
             userIntendedMicState = false;
+            resetMicRecovery();
             isMicActive = false;
             recognitionStartFailures = 0;
             clearTimeout(restartRecognitionTimer);
@@ -1025,11 +1162,13 @@ function handleMicToggle(e) {
     console.log(`[JARVIS DEBUG] Microfone acionado via ${eventType} (largura: ${window.innerWidth}px)`);
 
     unlockAudio();
+    resetMicRecovery();
 
     if (!isSpeechRecognitionSupported()) {
         const msg = "Reconhecimento de voz indisponível neste navegador. Certifique-se de usar Chrome ou Safari via HTTPS.";
         alert("Aviso JARVIS: " + msg);
         userIntendedMicState = false;
+        stopAudioAnalyzer();
         updateMicUI(false);
         setCoreState("muted");
         return;
@@ -1043,6 +1182,7 @@ function handleMicToggle(e) {
         clearTimeout(restartRecognitionTimer);
         clearTimeout(silenceDispatchTimer);
         stopRecognition(true);
+        stopAudioAnalyzer();
         updateMicUI(false);
         setCoreState("muted");
         appendLogLine("SYS: Microfone silenciado pelo usuário.", "sys");
@@ -1058,10 +1198,17 @@ function handleMicToggle(e) {
         setCoreState("active");
         appendLogLine("SYS: [DEBUG] Inicializando microfone...", "sys");
 
-        // Analisador Web Audio em background (sem bloquear o reconhecimento)
-        initUserAudioInput().catch(err => {
-            console.warn("[JARVIS DEBUG] Aviso no analisador de áudio:", err);
-        });
+        // No PC o SpeechRecognition tem prioridade exclusiva do dispositivo.
+        // O analisador WebAudio só é iniciado se habilitado via ?analyser e nunca
+        // enquanto a captura de voz estiver ativa; o pulso sintético de
+        // renderHoloCore() cobre a visualização. Mobile mantém o fluxo original.
+        if (isMobileDevice) {
+            initUserAudioInput().catch(err => {
+                console.warn("[JARVIS DEBUG] Aviso no analisador de áudio:", err);
+            });
+        } else if (ENABLE_PC_WEBAUDIO_ANALYSER) {
+            scheduleAudioAnalyzerInit();
+        }
 
         // Inicia o reconhecimento de voz com tratamento seguro
         try {
@@ -1073,6 +1220,8 @@ function handleMicToggle(e) {
             userIntendedMicState = false;
             isStartingRecognition = false;
             isMicActive = false;
+            resetMicRecovery();
+            stopAudioAnalyzer();
             updateMicUI(false);
             setCoreState("muted");
         }
@@ -1496,6 +1645,8 @@ function onAISpeechFinished() {
     }
 
     if (userIntendedMicState && !isMicActive) {
+        // A retomada normal substitui qualquer backoff pendente.
+        resetMicRecovery();
         try {
             startRecognition();
         } catch (err) {
@@ -1594,7 +1745,9 @@ function triggerInterrupt() {
     userVoiceLevel = 0.0;
 
     userIntendedMicState = false;
+    resetMicRecovery();
     stopRecognition(true);
+    stopAudioAnalyzer();
     updateMicUI(false);
     setCoreState("muted");
 

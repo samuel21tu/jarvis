@@ -293,7 +293,7 @@ NOVO TRECHO:
                 if resposta.text:
                     return resposta.text
             except LLMProviderError as erro:
-                print(f"[MEMORY] Resumo falhou com {model}: {erro}")
+                print(f"[MEMORY] Resumo falhou: {erro}")
     finally:
         await provider.close()
     return ""
@@ -358,7 +358,7 @@ async def chat_with_nexus(prompt: str, history: list, origin: str = "server", at
         mensagens = mensagens_router(history, build_system_prompt(origin), prompt, attachments)
 
         for modelo in modelos:
-            await manager.stream_log_to_mobile(f"Processando solicitação com {modelo}...", level="info")
+            await manager.stream_log_to_mobile("Processando solicitação...", level="info")
             try:
                 resposta = await provider.generate(modelo, mensagens, jarvis_tools)
 
@@ -412,7 +412,7 @@ async def chat_with_nexus(prompt: str, history: list, origin: str = "server", at
 
             except LLMProviderError as erro:
                 await manager.stream_log_to_mobile(
-                    f"Roteador indisponível com {modelo} ({erro.status or 'rede'}).", level="warn"
+                    f"Roteador indisponível ({erro.status or 'rede'}).", level="warn"
                 )
                 if erro.status in (400, 401, 403):
                     break  # credencial/configuração inválida: outros modelos não ajudariam
